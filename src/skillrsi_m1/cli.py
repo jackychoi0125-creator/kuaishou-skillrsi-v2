@@ -12,6 +12,7 @@ from typing import Any
 from .core import (BENCHMARKS, TAXONOMY, diagnostic_gap, events_from_trace, load_atif_jsonl,
                    make_record, metric_rows, prepare_train, summarize)
 from .judge import ChatClient, classify_and_localize
+from . import reliability
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -116,6 +117,12 @@ def main() -> None:
     prepare = sub.add_parser("prepare", help="build original Train ATIF JSONL from trial traces")
     prepare.add_argument("--metrics-dir", type=Path, default=REPO.parent / "metrics")
     prepare.add_argument("--output-dir", type=Path, default=REPO / "data/train")
+    validate = sub.add_parser("validate", help="M1 deterministic reliability and outcome audit")
+    validate.add_argument("--metrics-dir", type=Path, default=REPO.parent / "metrics")
+    validate.add_argument("--input-dir", type=Path, default=REPO / "data/train")
+    validate.add_argument("--output-dir", type=Path, default=REPO / "results/m1")
+    validate.add_argument("--dry-run", action="store_true")
+    validate.add_argument("--metrics-variant", choices=("baseline", "baseline-original"), default="baseline")
     run = sub.add_parser("diagnose", help="create evidence-grounded FailureRecords")
     run.add_argument("--metrics-dir", type=Path, default=REPO.parent / "metrics")
     run.add_argument("--input-dir", type=Path, default=REPO / "data/train")
@@ -130,6 +137,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "prepare":
         result = prepare_train(args.metrics_dir, args.output_dir)
+    elif args.command == "validate":
+        result = reliability.run(args.metrics_dir, args.input_dir, args.output_dir, args.dry_run, args.metrics_variant)
     else:
         if args.workers < 1:
             parser.error("--workers must be positive")

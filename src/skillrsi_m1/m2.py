@@ -459,17 +459,39 @@ def main(argv: list[str] | None = None) -> None:
     build_parser.add_argument("--per-group", type=int, default=2)
     build_parser.add_argument("--window", type=int, default=1)
     build_parser.add_argument("--excerpt-chars", type=int, default=450)
+    build_parser.add_argument("--validated", type=Path, default=REPO / "results/m1/validated.jsonl")
+    build_parser.add_argument("--legacy-m1-records", type=Path)
+    build_parser.add_argument("--no-legacy-m1", action="store_true")
+    build_parser.add_argument("--legacy-build", action="store_true", help="run previous M2 format exactly")
+    build_parser.add_argument("--dry-run", action="store_true")
+    build_parser.add_argument("--max-deep-read-traces", type=int)
+    build_parser.add_argument("--max-positive-traces", type=int, default=6)
+    build_parser.add_argument("--max-negative-traces", type=int, default=8)
+    build_parser.add_argument("--max-contrast-pairs", type=int, default=4)
+    build_parser.add_argument("--max-llm-input-tokens", type=int, default=30000)
     fetch_parser = sub.add_parser("fetch")
     fetch_parser.add_argument("--m1-records", type=Path, default=REPO / "results/m1/records.jsonl")
+    fetch_parser.add_argument("--validated", type=Path, default=REPO / "results/m1/validated.jsonl")
+    fetch_parser.add_argument("--legacy-source", action="store_true")
     fetch_parser.add_argument("--benchmark", choices=BENCHMARKS, required=True)
     fetch_parser.add_argument("--task-id", required=True)
     fetch_parser.add_argument("--event-id", required=True)
     args = parser.parse_args(argv)
     if args.command == "build":
-        result = build(args.metrics_dir, args.m1_records, args.output_dir, args.max_l2,
-                       args.per_group, args.window, args.excerpt_chars)
+        if args.legacy_build:
+            result = build(args.metrics_dir, args.m1_records, args.output_dir, args.max_l2,
+                           args.per_group, args.window, args.excerpt_chars)
+        else:
+            from .m2_pipeline import run
+            result = run(args.validated, None if args.no_legacy_m1 else (args.legacy_m1_records or args.m1_records),
+                         args.output_dir, max_deep_read_traces=args.max_deep_read_traces or args.max_l2,
+                         max_positive_traces=args.max_positive_traces,
+                         max_negative_traces=args.max_negative_traces,
+                         max_contrast_pairs=args.max_contrast_pairs,
+                         max_llm_input_tokens=args.max_llm_input_tokens, dry_run=args.dry_run)
     else:
-        result = fetch(args.m1_records, args.benchmark, args.task_id, args.event_id)
+        result = fetch(args.m1_records if args.legacy_source else args.validated,
+                       args.benchmark, args.task_id, args.event_id)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

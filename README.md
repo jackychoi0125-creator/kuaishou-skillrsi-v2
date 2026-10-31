@@ -1,24 +1,30 @@
-# SkillRSI v2 — M1 数据可靠性过滤与 M2 Trace 分类压缩
+# SkillRSI v2 — 统一正反轨迹画像与对照分析
 
-本仓库实现 Trace2Skill 的 M1 和 M2：从三个 Benchmark 的 **Train 原始 ATIF Trace**、原始逐题 Metrics 和公开任务约束生成可追溯的 `FailureRecord`，再生成按错误机制聚类的 `EvidenceGroup` 和少量代表轨迹视图。它尚不生成 Skill，也不把 reward=0 自动解释为某个推理错误。
+本仓库实现 Trace2Skill 的 M1 和 M2：M1 对三个 Benchmark 的 Train Trace 做确定性可靠性与结果审计；M2 对成功和失败轨迹采用同一任务、行为、结果、诊断 Schema，生成正向策略候选、失败模式和分级正反对照。正式 Train Baseline 的 154 条任务包含 98 成功、56 失败；M2 不把 reward=0 自动解释为某个推理错误。
 
 ## 输入与运行
 
-默认假设本仓库位于 `rsiV2/kuaishou-skillrsi-v2/`，上一层已有 `metrics/*-baseline-original.csv`、Kit 原始 trial 和 `model.txt`。原始 CSV 仅用于关联任务、分数和基础设施状态；诊断步骤来自逐题 `agent/trajectory.json`。准备命令把 Train 轨迹原样包入 Kit 风格的 ATIF JSONL，并记录原文件 SHA-256：
+默认假设本仓库位于 `rsiV2/kuaishou-skillrsi-v2/`，上一层已有正式 `metrics/*-baseline.csv`、原始 `*-baseline-original.csv` 和 Kit trial。M1 使用正式逐题 Metrics、原始 ATIF JSONL 与补跑源轨迹；M2 只读取 Train 任务的公开输入和轨迹。准备命令把原始 Train 轨迹原样包入 ATIF JSONL，并记录源文件 SHA-256：
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -U pip wheel setuptools
 .venv/bin/python -m pip install -e .
 .venv/bin/skillrsi-m1 prepare
-.venv/bin/skillrsi-m1 diagnose --llm --workers 2
+.venv/bin/skillrsi-m1 validate
 .venv/bin/skillrsi-m2 build
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
-无需模型的规则检查可运行 `skillrsi-m1 diagnose`。模型阶段默认读取上一层的 `model.txt`，调用 Kimi K2.6，默认关闭 thinking 以减少长请求；可加 `--kimi-thinking` 使用网关默认 thinking 模式。`--model-config` 可指向另一配置文件。HTTP 429、读取超时和连接重置均会重试；失败的 Judge 记录可用 `--resume` 补跑。`--metrics-dir`、`--input-dir`、`--output-dir` 可覆盖默认路径。
+新 M1/M2 默认不调用模型，支持 `--dry-run`。M1 默认读取正式合并的 `*-baseline.csv`，用 `--metrics-variant baseline-original` 可复现原始运行口径。历史命令 `skillrsi-m1 diagnose --llm --resume` 仍保留，但不属于新的 M1 职责；旧 Judge 的受支持根因由 M2 校验 Trace SHA 与事件引用后导入。`skillrsi-m2 build --legacy-build` 可运行旧版 M2 聚类。
 
-输出在 `results/m1/`：
+新输出在 `results/m1/validated.jsonl`、`audit.json` 和 `results/m2/trace_profiles.jsonl`、`positive_strategy_groups.json`、`failure_pattern_groups.json`、`contrast_groups.json`、`l2_contrasts.json`、`m2_summary.json`、`deep_views/`。已有 `records.jsonl` 等历史文件不删除；M2 还生成旧字段的转换视图。完整数据流、Schema 和兼容性见 [DESIGN.md](DESIGN.md)。
+
+L2 预算用 `--max-deep-read-traces`、`--max-positive-traces`、`--max-negative-traces`、`--max-contrast-pairs`、`--max-llm-input-tokens` 调整；`--dry-run` 只统计不写文件。M2 默认不调用 LLM，`max_llm_input_tokens` 是准备给后续语义分析的视图长度代理预算，不是实际 API 消耗。原始事件可用 `skillrsi-m2 fetch --benchmark alfworld --task-id train__0017 --event-id s19.call4` 回查。
+
+## 历史 M1 诊断（兼容）
+
+旧 `skillrsi-m1 diagnose` 的输出仍在 `results/m1/`：
 
 - `records.jsonl`：全部 154 条 Train 任务，含成功和基础设施过滤结果。
 - `failures.jsonl`：有效任务失败的诊断记录。
@@ -61,9 +67,9 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 这是受 AgentDebug 和 AgentRx 思路启发的轻量实现，不是两套项目的完整复刻。规则发现的局部错误不等于最终失败根因；LLM Judge 可以拒绝候选。没有独立验证证据的 LiveMath 失败保留为待验证。下一阶段可以加入人工标注集，对置信度与关键步骤准确率做校准。
 
-## M2：渐进式 Trace 视图
+## 历史 M2 视图（兼容）
 
-`skillrsi-m2 build` 默认读取 `results/m1/records.jsonl` 和上一层原始 Metrics，输出 `results/m2/`：
+`skillrsi-m2 build --legacy-build` 读取 `results/m1/records.jsonl` 和上一层原始 Metrics，输出旧版 `results/m2/`：
 
 - `l0.jsonl`：全部 Train 任务的 Metadata、Metrics、M1 摘要与成本估计。L0 不打开 ATIF；LiveMath 题型仅从公开问题文本用关键词粗标。
 - `groups.jsonl`：按已支持根因、规则候选、可观察信号、未确定根因等机制分组的 `EvidenceGroup`。`mechanism_status` 区分已支持根因与仅观察到的现象；成功案例按任务家族分组，并可作为同类失败的正例指针。

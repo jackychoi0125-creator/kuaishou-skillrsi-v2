@@ -1,22 +1,37 @@
-# M1 设计要点
+# 统一 Trace 分析设计（M1 / M2）
 
-## 数据边界
+## 实际调用链
 
-- 以原始 ATIF `steps` 为定位依据；Metrics CSV 只提供结果和基础设施状态。
-- 使用原始无 Skill Train 运行，不使用补跑合并后的分数替代原始轨迹。
-- `task_id` 关联 Metrics 与 JSONL；`source_trace_path` 和 SHA-256 支持回查。
-- 仅读取 Agent 可见的 `instruction.md` 与公开环境文件、任务运行约束。参考答案与评分脚本不进入诊断提示。
+`skillrsi-m1 prepare` 将原始 `baseline-original.csv` 的 Train ATIF 包装为 JSONL，保留源文件路径与 SHA-256。`skillrsi-m1 validate` 默认读取正式合并的 `baseline.csv`；四条补跑任务读取正式补跑 Trace，同时记录原始 Trace 路径。输出 `ValidatedTrace` 到 `results/m1/validated.jsonl` 和完整 `audit.json`。
 
-## 证据门控
+`skillrsi-m2 build` 读取 `ValidatedTrace`，用 `adapters.py` 提取公开任务特征、从原始 ATIF 事件提取五维行为标签，并在 `m2_diagnostics.py` 中封装旧约束规则作为失败根因**假设**。只有旧 Judge 记录与当前 Trace SHA-256、事件 ID 完全匹配时才导入既有确认根因。随后生成正向策略候选组、失败模式组、分级正反对照组与 L2 深读视图。
 
-约束检查器输出候选 `rule_id`、ATIF event ID 和步骤号。分类器只能选择候选支持的 AgentDebug 模块与类型；Judge 只能引用候选已有的事件 ID。低置信度候选和无法排除后续修复的脚本错误维持 `needs_review`。所有根因字段必须能回指 `evidence`。
+```
+Train Metrics + original/retry ATIF
+    → M1 validate: trace_validity × task_outcome × reliability_flags
+    → M2 profile: task_signature × behavior_signature × outcome × diagnosis
+    → positive / failure / contrast groups
+    → selected L2 deep views (trace_id + event_id → original ATIF)
+```
 
-## Benchmark 差异
+M1 不调用模型，也不判定策略或根因。旧 `skillrsi-m1 diagnose` 保留为历史输出兼容入口；新流程不调用它。旧 M2 `--legacy-build` 仍可重现原有聚类，默认 `build` 写新结构并输出旧字段转换视图。
 
-- SpreadsheetBench：识别脚本/工具明确报错及无输出文件；早期报错后仍有工具调用时降级，避免把已修复的错误认作根因。
-- ALFWorld：读取 `bridge.sh send` 动作、环境观察和 admissible commands；仅在环境也明确拒绝时，才把不在命令列表中的动作标为无效。重复且无状态变化、处理失败后放置也可成为候选。
-- LiveMath：无独立数学验证时不判断推导根因；仅检测最终答案格式的可观察违约。
+## 统一 Schema 与证据边界
 
-## 待校准事项
+M1 的 `trace_validity` 为 `valid / partial / invalid`，`task_outcome` 为 `success / failure / uncertain`，两者独立。奖励为 1 的任务即使曾出现可恢复的 429，仍保留成功与异常标记。未成功完成的终态模型错误在原始版本可为 `partial + uncertain`；正式补跑使用新的完整轨迹，保留补跑来源。
 
-AgentDebug 的 17 个错误名称按模块使用；`hallucination` 在 Memory/Reflection 两模块均可出现。当前置信度由规则分值与 Judge 分值取较小值，不能解释为概率。后续需要人工核查样本估计 precision、关键步骤准确率，并建立稳定的接受阈值。
+M2 的每条 `trace_profile` 使用相同的 `task_signature`、五维 `behavior_signature`、`outcome` 和 `diagnosis` 字段。行为标签必须指向真实 `event_id`，状态只允许 `observed / not_observed / not_observable / unknown`。成功不自动等于高效；失败不自动等于某行为造成结果。诊断区分观察现象、未证实假设和已确认根因。LiveMath 答错本身不构成数学错误证据。
+
+正反匹配按 A（同 Train 任务不同执行）→ B（操作、约束、复杂度、实际题意相近）→ C（同家族且仍有一定操作与题意相似）判断。无足够相似度输出 `no_matched_positive`，尤其不会用不同数学题型强配 LiveMath。对照中的行为差异标为 `hypothesis_only`。
+
+## 兼容性与数据来源
+
+正式 Train 154 条由 `baseline.csv` 提供：原始 CSV 为 96 成功、58 失败；四条模型错误补跑替换后，2 条由失败变成功，形成 98 成功、56 失败。`audit.json` 逐题保存四条替换的原始/补跑路径。旧 M1 只分析原始轨迹得到 96/54/4，未丢题，但将四条基础设施失败从有效任务失败中隔离。
+
+新文件为 `validated.jsonl`、`audit.json`、`trace_profiles.jsonl`、`positive_strategy_groups.json`、`failure_pattern_groups.json`、`contrast_groups.json`、`l2_contrasts.json`、`m2_summary.json` 和 `deep_views/*.json`。旧 `records.jsonl`、`summary.json` 原样保留；M2 仍提供 `l0.jsonl`、`groups.jsonl`、`selection.jsonl`、`evaluation.json`、`views/*.json` 的字段转换视图。原始 ATIF 不修改。
+
+## 成本与局限
+
+新 M1/M2 默认均为确定性程序，新增模型调用和计费 Token 都为 0；M2 记录各阶段耗时、深读数量、视图长度比例和估算上下文 Token。旧 Judge 的 15 个案例、98,827 Prompt Token 和 33,874 Completion Token 被标为历史导入，不重复计费。L2 视图可按 `trace_id`、`event_id` 回取原文；超长 Agent 消息只保留分析相关的首尾内容，原始事件不删除。
+
+行为标签仍是规则观测，不等于有效策略；成功组是可复用策略**候选**。没有独立验证的数学根因继续保持 `undetermined`。匹配分数是排序启发式，B/C 级配对仍需后续独立验证，不能作为因果结论。

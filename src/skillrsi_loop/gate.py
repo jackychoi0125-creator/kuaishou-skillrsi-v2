@@ -76,6 +76,8 @@ def compare(benchmark: str, baseline_job: Path, candidate_job: Path, out_dir: Pa
               "transitions": transitions, "net_gain": gain, "invalid_task_ids": invalid,
               "baseline_model_errors": sum(_truth(row["model_error"]) for row in before.values()),
               "candidate_model_errors": sum(_truth(row["model_error"]) for row in after.values()),
+              "baseline_recovered_model_errors": sum(int(row.get("recovered_model_errors") or 0) for row in before.values()),
+              "candidate_recovered_model_errors": sum(int(row.get("recovered_model_errors") or 0) for row in after.values()),
               "baseline_execution_errors": sum(_truth(row["exception"]) for row in before.values()),
               "candidate_execution_errors": sum(_truth(row["exception"]) for row in after.values()),
               "decision": decision, "confidence": "low" if gain == 1 else "unquantified",

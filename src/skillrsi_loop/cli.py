@@ -167,7 +167,8 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
             lines.append(f"| {state['benchmark']} | {gate['baseline_pass']}/{gate['tasks']} | {gate['candidate_pass']}/{gate['tasks']} | {t['fail_to_pass']} | {t['pass_to_fail']} | {gate['decision']} |")
         else:
             lines.append(f"| {state['benchmark']} | — | — | — | — | 阶段未完成 |")
-    lines += ["", "仅有一题净增益时为低置信观察，不表示统计显著。详细运行目录和调用记录见各 Benchmark 的 manifest 与 usage。"]
+    lines += ["", "历史参考 Val 分数为 SpreadsheetBench 30/40、ALFWorld 12/18、LiveMath 7/17；本表以当前 Kit 同配置复测结果作为配对基线。",
+              "仅有一题净增益时为低置信观察，不表示统计显著。详细运行目录和调用记录见各 Benchmark 的 manifest 与 usage。"]
     lines += ["", "## 生成与调用审计", "",
               "| Benchmark | M3 Kimi Prompt / Completion / Cache | M4 Kimi Prompt / Completion / Cache | M3/M4 调用与耗时 | Skill bytes |", "|---|---:|---:|---:|---:|"]
     for state in states:

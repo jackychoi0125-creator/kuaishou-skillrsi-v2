@@ -352,6 +352,62 @@ def choose_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(candidates, key=lambda x: (x["confidence"], -min(x["critical_steps"])))
 
 
+def observed_failure_modes(benchmark: str, status: str, events: list[dict[str, Any]],
+                           row: dict[str, str]) -> list[dict[str, Any]]:
+    """Record directly observable failure phenotypes separately from causal roots."""
+    if status != "task_failure":
+        return []
+    modes: list[dict[str, Any]] = []
+    if benchmark == "alfworld":
+        states = []
+        for event in events:
+            if event["kind"] != "observation":
+                continue
+            try:
+                payload = json.loads(event["text"])
+            except (ValueError, TypeError):
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("steps"), int) and isinstance(payload.get("done"), bool):
+                states.append((event, payload))
+        if states:
+            event, state = states[-1]
+            steps, maximum = state.get("steps"), state.get("max_steps")
+            if state.get("won") is False and state["done"] and isinstance(maximum, int) and steps >= maximum:
+                modes.append({"code": "action_budget_exhausted", "event_id": event["id"],
+                              "observed_steps": steps, "max_steps": maximum})
+            elif state.get("won") is False and not state["done"]:
+                modes.append({"code": "agent_stopped_with_unfinished_episode", "event_id": event["id"],
+                              "observed_steps": steps, "max_steps": maximum})
+    elif benchmark == "livemath":
+        messages = [event for event in events if event["kind"] == "message" and event.get("source") == "agent"]
+        if messages:
+            final = messages[-1]
+            code = "boxed_option_present_reward_zero" if BOX_RE.search(final["text"]) else "boxed_option_absent"
+            modes.append({"code": code, "event_id": final["id"]})
+    elif benchmark == "spreadsheetbench":
+        answer_dir = Path(row["trial_path"]) / "artifacts/bench/answers"
+        scripts = list(answer_dir.rglob("solution.py")) if answer_dir.is_dir() else []
+        last_event = next((event for event in reversed(events) if event["kind"] in {"tool_call", "message"}), None)
+        modes.append({"code": "submitted_script_reward_zero" if scripts else "missing_submitted_script",
+                      "event_id": last_event["id"] if last_event else None})
+    return modes
+
+
+def diagnostic_gap(record: dict[str, Any]) -> str | None:
+    """Explain why a failed task does not have a supported root diagnosis."""
+    if record["outcome"] != "task_failure":
+        return None
+    if record["diagnosis_status"] in {"judge_supported", "rule_supported"}:
+        return None
+    if record.get("judge_error"):
+        return "judge_error"
+    if record.get("candidate_count", 0):
+        return "candidate_not_confirmed_by_judge"
+    return {"livemath": "independent_math_verification_missing",
+            "spreadsheetbench": "cell_level_output_diff_missing",
+            "alfworld": "causal_action_evidence_missing"}.get(record["benchmark"], "no_supported_candidate")
+
+
 def make_record(benchmark: str, row: dict[str, str], item: dict[str, Any] | None) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     validity, flags = trace_validity(item, row)
     status = outcome(row, validity)
@@ -386,6 +442,9 @@ def make_record(benchmark: str, row: dict[str, str], item: dict[str, Any] | None
         "trace_sha256": item.get("trace_sha256") if item else None,
         "source_trace_path": item.get("source_trace_path") if item else None,
         "metric_trial_path": row["trial_path"],
+        "candidate_count": len(candidates),
+        "candidate_rule_ids": list(dict.fromkeys(candidate["rule_id"] for candidate in candidates)),
+        "observed_failure_modes": observed_failure_modes(benchmark, status, events, row),
     }
     return record, candidates, events, context
 
@@ -397,4 +456,6 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
         "outcomes": dict(Counter(r["outcome"] for r in records)),
         "diagnoses": dict(Counter(r["diagnosis_status"] for r in records)),
         "rule_hits": dict(Counter(r["rule_id"] for r in records if r["rule_id"])),
+        "diagnostic_gaps": dict(Counter(r["diagnostic_gap"] for r in records if r.get("diagnostic_gap"))),
+        "observed_failure_modes": dict(Counter(mode["code"] for r in records for mode in r.get("observed_failure_modes", []))),
     }

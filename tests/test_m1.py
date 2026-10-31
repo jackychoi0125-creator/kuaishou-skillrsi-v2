@@ -5,8 +5,9 @@ import io
 from pathlib import Path
 from unittest.mock import patch
 
-from skillrsi_m1.core import (check_constraints, choose_candidate, events_from_trace,
-                              outcome, sha256, trace_validity)
+from skillrsi_m1.core import (check_constraints, choose_candidate, diagnostic_gap,
+                              events_from_trace, observed_failure_modes, outcome,
+                              sha256, trace_validity)
 from skillrsi_m1.cli import validate_records
 from skillrsi_m1.judge import ChatClient, _json_object
 
@@ -24,6 +25,19 @@ def step(step_id, command, observation, admissible=None):
 
 
 class ReliabilityTests(unittest.TestCase):
+    def test_terminal_alf_state_is_mode_not_inferred_root(self):
+        trace = {"steps": [step(1, 'bridge.sh send train:1 "look"',
+                                "room", ["go to kitchen"])]}
+        trace["steps"][0]["observation"]["results"][0]["content"] = json.dumps({
+            "observation": "room", "steps": 50, "max_steps": 50,
+            "done": True, "won": False})
+        modes = observed_failure_modes("alfworld", "task_failure", events_from_trace(trace), {})
+        self.assertEqual(modes[0]["code"], "action_budget_exhausted")
+        self.assertEqual(modes[0]["event_id"], "s1.obs1")
+        self.assertEqual(diagnostic_gap({"benchmark": "alfworld", "outcome": "task_failure",
+                                         "diagnosis_status": "needs_review", "candidate_count": 0}),
+                         "causal_action_evidence_missing")
+
     def test_terminal_429_is_infrastructure_failure(self):
         row = {"task_id": "train__0000", "reward": "0.0", "model_error": "True",
                "agent_429_errors": "4", "execution_error": "False", "scoring_error": "False"}

@@ -58,6 +58,13 @@ class ProgressiveTraceTests(unittest.TestCase):
                "task_family": "simple_pick_place", "trace_signals": {"repeated_actions": 2}}
         self.assertEqual(mechanism(row), ("signal:no_progress", "observed_signal_only"))
 
+    def test_terminal_mode_precedes_rejected_rule_candidate(self):
+        row = {"outcome": "task_failure", "diagnosis_status": "needs_review",
+               "root_cause": "undetermined", "rule_id": None,
+               "candidate_rule_ids": ["tool_error"],
+               "observed_failure_modes": [{"code": "action_budget_exhausted", "event_id": "s5.obs1"}]}
+        self.assertEqual(mechanism(row), ("signal:action_budget_exhausted", "observed_signal_only"))
+
     def test_supported_event_is_in_view_and_fetch_returns_original(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

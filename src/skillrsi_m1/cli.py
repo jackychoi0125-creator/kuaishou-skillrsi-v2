@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from .core import (BENCHMARKS, TAXONOMY, events_from_trace, load_atif_jsonl,
+from .core import (BENCHMARKS, TAXONOMY, diagnostic_gap, events_from_trace, load_atif_jsonl,
                    make_record, metric_rows, prepare_train, summarize)
 from .judge import ChatClient, classify_and_localize
 
@@ -94,6 +94,8 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
                 print(f"judge {done}/{len(selected)} {record['benchmark']}/{record['task_id']} "
                       f"{record['diagnosis_status']}", file=sys.stderr, flush=True)
     validate_records(records)
+    for record in records:
+        record["diagnostic_gap"] = diagnostic_gap(record)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_jsonl(args.output_dir / "records.jsonl", records)
     _write_jsonl(args.output_dir / "failures.jsonl", [r for r in records if r["outcome"] == "task_failure"])

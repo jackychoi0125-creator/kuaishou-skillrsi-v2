@@ -122,6 +122,9 @@ def build_l0(metrics_dir: Path, m1_records_path: Path) -> list[dict[str, Any]]:
                 "error_module": m1["error_module"], "error_type": m1["error_type"],
                 "root_cause": m1["root_cause"], "rule_id": m1["rule_id"],
                 "diagnosis_status": m1["diagnosis_status"], "confidence": m1["confidence"],
+                "diagnostic_gap": m1.get("diagnostic_gap"),
+                "candidate_rule_ids": m1.get("candidate_rule_ids", []),
+                "observed_failure_modes": m1.get("observed_failure_modes", []),
                 "critical_steps": m1["critical_steps"], "supporting_events": m1["supporting_events"],
                 "source_trace_path": m1["source_trace_path"], "trace_sha256": m1["trace_sha256"],
                 "trace_chars": int(metric.get("trace_chars") or 0),
@@ -222,6 +225,11 @@ def mechanism(row: dict[str, Any]) -> tuple[str, str]:
         return f"root:{row['error_module']}:{row['root_cause']}", "judge_supported"
     if row.get("rule_id"):
         return f"candidate:{row['error_module']}:{row['rule_id']}", "candidate_only"
+    for mode in row.get("observed_failure_modes") or []:
+        if mode["code"] in {"action_budget_exhausted", "agent_stopped_with_unfinished_episode"}:
+            return f"signal:{mode['code']}", "observed_signal_only"
+    if row.get("candidate_rule_ids"):
+        return f"rejected_candidate:{row['candidate_rule_ids'][0]}", "candidate_not_root"
     signals = row.get("trace_signals") or {}
     if signals.get("invalid_returns"):
         return "signal:invalid_return", "observed_signal_only"

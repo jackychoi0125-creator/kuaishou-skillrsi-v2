@@ -55,6 +55,8 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 每条记录还包含 `evidence` 摘录、原始 Trace 路径与 SHA-256、原 trial 路径和可靠性标记。上例展示结构，不代表 `train__0013` 最终一定获得该诊断。
 
+失败记录还包含 `observed_failure_modes`、`candidate_count`、`candidate_rule_ids` 和 `diagnostic_gap`。这些字段把可直接观察的失败现象与可归因的根因分开。例如 ALFWorld 的 `action_budget_exhausted` 来自环境返回的 `steps/max_steps/done/won`；它说明终态，不自动证明哪一步规划造成耗尽。LiveMath 最终消息含有方框选项但得分为零的情况只标记 `boxed_option_present_reward_zero`，根因仍待独立数学验证。
+
 ## 边界
 
 这是受 AgentDebug 和 AgentRx 思路启发的轻量实现，不是两套项目的完整复刻。规则发现的局部错误不等于最终失败根因；LLM Judge 可以拒绝候选。没有独立验证证据的 LiveMath 失败保留为待验证。下一阶段可以加入人工标注集，对置信度与关键步骤准确率做校准。

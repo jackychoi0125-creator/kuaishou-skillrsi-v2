@@ -172,6 +172,8 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
               "仅有一题净增益时为低置信观察，不表示统计显著。详细运行目录和调用记录见各 Benchmark 的 manifest 与 usage。"]
     lines += ["", "## 生成与调用审计", "",
               "| Benchmark | M3 Kimi Prompt / Completion / Cache | M4 Kimi Prompt / Completion / Cache | M3/M4 调用与耗时 | Skill bytes |", "|---|---:|---:|---:|---:|"]
+    overall = {"prompt_tokens": 0, "completion_tokens": 0, "cache_tokens": 0,
+               "api_calls": 0, "retries": 0}
     for state in states:
         bench = state["benchmark"]
         base = root / "results/r1" / bench
@@ -194,6 +196,8 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
                 original = json.loads(receipt.read_text()).get("usage", {})
                 for key in totals:
                     totals[key] += original.get(key, 0)
+                for key in overall:
+                    overall[key] += original.get(key, 0)
             return f"{totals['prompt_tokens']} / {totals['completion_tokens']} / {totals['cache_tokens']}"
         manifest = base / "m4/candidate_manifest.json"
         size = json.loads(manifest.read_text()).get("bytes", "—") if manifest.is_file() else "—"
@@ -212,6 +216,15 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
         m3_count, m3_time = effort("m3")
         m4_count, m4_time = effort("m4")
         lines.append(f"| {bench} | {usage('m3')} | {usage('m4')} | {m3_count}/{m4_count} calls; {m3_time}/{m4_time}s | {size} |")
+    lines += ["", f"本轮最终候选使用去重 Kimi 请求 {overall['api_calls']} 次、重试 {overall['retries']} 次；"
+              f"Prompt {overall['prompt_tokens']}、Completion {overall['completion_tokens']}、"
+              f"Cache {overall['cache_tokens']}，总分析 Token {overall['prompt_tokens'] + overall['completion_tokens']}。"]
+    all_receipts = [json.loads(path.read_text())["usage"] for path in (root / "results/r1/cache").glob("*.json")]
+    lines += [f"包含被审计淘汰和重新生成的探索调用，实际累计 Kimi 请求 {sum(x.get('api_calls', 0) for x in all_receipts)} 次、"
+              f"重试 {sum(x.get('retries', 0) for x in all_receipts)} 次、"
+              f"Prompt {sum(x.get('prompt_tokens', 0) for x in all_receipts)}、"
+              f"Completion {sum(x.get('completion_tokens', 0) for x in all_receipts)}、"
+              f"总 Token {sum(x.get('prompt_tokens', 0) + x.get('completion_tokens', 0) for x in all_receipts)}。"]
     lines += ["", "表中 Token 为产生当前版本的去重 API 收据用量；缓存命中的本次增量调用为零。模型完整请求、响应及服务端 usage 保存在 results/r1/cache；各阶段调用次数、重试和耗时见 usage.json。",
               "Val 逐题反馈只用于 diff 与 Gate，未反馈给 M3/M4。"]
     lines += ["", "## Val 耗时与错误", "",

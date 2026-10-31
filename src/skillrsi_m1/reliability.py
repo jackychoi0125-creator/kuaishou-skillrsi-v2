@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from .core import BENCHMARKS, EXPECTED_TRAIN, events_from_trace, sha256
+from .core import BENCHMARKS, EXPECTED_TRAIN, events_from_trace
 
 
 def _flag(value: Any) -> bool:
@@ -93,17 +94,17 @@ def validate_one(benchmark: str, row: dict[str, str], entry: dict[str, Any] | No
         if len(step_ids) != len(steps) or any(type(value) is not int for value in step_ids) or len(set(step_ids)) != len(step_ids):
             flags.append("invalid_step_ids")
             validity = "invalid"
-        if trace_hash and sha256(trace_path) != trace_hash:
-            flags.append("trace_hash_mismatch")
-            validity = "invalid"
-        if validity == "valid":
-            try:
-                if json.loads(trace_path.read_text(encoding="utf-8")) != trace:
-                    flags.append("embedded_atif_source_mismatch")
-                    validity = "invalid"
-            except (OSError, ValueError, TypeError):
-                flags.append("malformed_source_trace")
+        try:
+            source_bytes = trace_path.read_bytes()
+            if trace_hash and hashlib.sha256(source_bytes).hexdigest() != trace_hash:
+                flags.append("trace_hash_mismatch")
                 validity = "invalid"
+            elif json.loads(source_bytes) != trace:
+                flags.append("embedded_atif_source_mismatch")
+                validity = "invalid"
+        except (OSError, ValueError, TypeError):
+            flags.append("malformed_source_trace")
+            validity = "invalid"
         if validity == "valid" and (not any(step.get("source") == "agent" for step in steps)
                                     or _flag(row.get("model_error")) and reward != 1):
             flags.append("incomplete_agent_run")
@@ -141,9 +142,10 @@ def validate_one(benchmark: str, row: dict[str, str], entry: dict[str, Any] | No
 def _direct_entry(row: dict[str, str]) -> dict[str, Any]:
     path = Path(row.get("trace_path") or "")
     try:
-        trace = json.loads(path.read_text(encoding="utf-8"))
+        source_bytes = path.read_bytes()
+        trace = json.loads(source_bytes)
         return {"case_id": row["task_id"], "source_trace_path": str(path),
-                "trace_sha256": sha256(path), "trace": trace}
+                "trace_sha256": hashlib.sha256(source_bytes).hexdigest(), "trace": trace}
     except (OSError, ValueError, TypeError) as exc:
         return {"case_id": row["task_id"], "source_trace_path": str(path),
                 "trace_sha256": None, "trace": None, "trace_error": type(exc).__name__}

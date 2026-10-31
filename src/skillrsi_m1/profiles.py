@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from .adapters import ADAPTERS, public_task
-from .core import events_from_trace, sha256
+from .core import events_from_trace
 from .m2_diagnostics import candidate_hypotheses
 
 DIMENSIONS = ("planning", "action", "verification", "efficiency", "recovery")
@@ -77,13 +78,13 @@ def profile_one(validated: dict[str, Any], legacy: dict[str, Any] | None = None)
     task = adapter.task_signature(validated, public)
     path = Path(validated["source_trace_path"])
     eligible = validated["trace_validity"] == "valid" and validated["task_outcome"] in {"success", "failure"}
-    if path.is_file() and validated.get("trace_sha256") and sha256(path) == validated["trace_sha256"]:
-        try:
-            trace = json.loads(path.read_text(encoding="utf-8"))
-            events = events_from_trace(trace) if isinstance(trace.get("steps"), list) else []
-        except (OSError, TypeError, ValueError):
-            events = []
-    else:
+    try:
+        source_bytes = path.read_bytes()
+        if not validated.get("trace_sha256") or hashlib.sha256(source_bytes).hexdigest() != validated["trace_sha256"]:
+            raise ValueError("trace hash mismatch")
+        trace = json.loads(source_bytes)
+        events = events_from_trace(trace) if isinstance(trace.get("steps"), list) else []
+    except (OSError, TypeError, ValueError):
         events = []
     if not events:
         eligible = False

@@ -93,7 +93,10 @@ def run_one(root: Path, benchmark: str, *, mode: str, resume: bool, stop_after: 
     m3_dir = result_root / "m3"
     m4_dir = result_root / "m4"
     client = KimiClient(model_path, root / "results/r1/cache") if mode == "real" else None
-    if not (resume and "m3" in state["stages"]):
+    m3_ready = (resume and "m3" in state["stages"] and
+                (mode == "dry-run" or (not state["stages"]["m3"].get("dry_run") and
+                                       (m3_dir / "insights.jsonl").is_file())))
+    if not m3_ready:
         start = time.monotonic()
         value = run_m3(m2, benchmark, m3_dir, client, dry_run=mode == "dry-run")
         done("m3", {**value, "elapsed_sec": round(time.monotonic() - start, 3)})

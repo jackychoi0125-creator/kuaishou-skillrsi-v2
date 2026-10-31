@@ -1,13 +1,16 @@
 import csv
 import hashlib
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from skillrsi_m3.core import EvidenceVerifier, InsightConsolidator, TraceStore, observed_math_definition_check, run as run_m3
 from skillrsi_m4.core import validate_skill, run as run_m4
 from skillrsi_loop.gate import compare
+from skillrsi_loop.cli import run_one
 
 
 class R1Tests(unittest.TestCase):
@@ -136,6 +139,12 @@ class R1Tests(unittest.TestCase):
             manifest = run_m4("alfworld", root / "m3", root / "skills", root / "m4", client)
             self.assertEqual(manifest["status"], "candidate")
             self.assertTrue(Path(manifest["skill_path"]).is_file())
+            shutil.copytree(m2, root / "results/m2")
+            dry = run_one(root, "alfworld", mode="dry-run", resume=False, stop_after="m3")
+            self.assertTrue(dry["stages"]["m3"]["dry_run"])
+            with patch("skillrsi_loop.cli.KimiClient", return_value=client):
+                real = run_one(root, "alfworld", mode="real", resume=True, stop_after="m3")
+            self.assertEqual(real["stages"]["m3"]["verified"], 1)
 
 
 if __name__ == "__main__":

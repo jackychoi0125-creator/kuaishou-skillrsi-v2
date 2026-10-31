@@ -10,7 +10,7 @@ from unittest.mock import patch
 from skillrsi_m3.core import EvidenceVerifier, InsightConsolidator, TraceStore, observed_math_definition_check, run as run_m3
 from skillrsi_m4.core import validate_skill, run as run_m4
 from skillrsi_loop.gate import compare
-from skillrsi_loop.cli import run_one
+from skillrsi_loop.cli import harbor_run, run_one
 
 
 class R1Tests(unittest.TestCase):
@@ -145,6 +145,20 @@ class R1Tests(unittest.TestCase):
             with patch("skillrsi_loop.cli.KimiClient", return_value=client):
                 real = run_one(root, "alfworld", mode="real", resume=True, stop_after="m3")
             self.assertEqual(real["stages"]["m3"]["verified"], 1)
+
+    def test_harbor_jobs_dir_starts_empty(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            kit = root / "kit"
+            kit.mkdir()
+            script = kit / "run.sh"
+            script.write_text("#!/bin/sh\nwhile [ \"$1\" != '--jobs-dir' ]; do shift; done\n"
+                              "root=$2\nif [ -d \"$root\" ] && [ -n \"$(ls -A \"$root\")\" ]; then exit 3; fi\n"
+                              "mkdir -p \"$root/job\"\nprintf 'qid,reward\\n' > \"$root/job/summary.csv\"\n")
+            script.chmod(0o755)
+            jobs = root / "runs/baseline"
+            self.assertEqual(harbor_run(kit, "livemath", jobs, None), jobs / "job")
+            self.assertTrue((root / "runs/baseline-controller.log").is_file())
 
 
 if __name__ == "__main__":

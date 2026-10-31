@@ -52,8 +52,9 @@ def harbor_run(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | No
             str(CONCURRENT[benchmark]), "--reasoning", "off", "--jobs-dir", str(jobs_root)]
     if skills_dir:
         args += ["--skills-dir", str(skills_dir)]
-    jobs_root.mkdir(parents=True, exist_ok=True)
-    log = jobs_root / "controller.log"
+    # LiveMath rejects a populated jobs directory before Harbor starts.
+    jobs_root.parent.mkdir(parents=True, exist_ok=True)
+    log = jobs_root.with_name(jobs_root.name + "-controller.log")
     with log.open("w", encoding="utf-8") as output:
         completed = subprocess.run(args, cwd=kit, stdout=output, stderr=subprocess.STDOUT, check=False)
     if completed.returncode:

@@ -166,7 +166,7 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
             lines.append(f"| {state['benchmark']} | — | — | — | — | 阶段未完成 |")
     lines += ["", "仅有一题净增益时为低置信观察，不表示统计显著。详细运行目录和调用记录见各 Benchmark 的 manifest 与 usage。"]
     lines += ["", "## 生成与调用审计", "",
-              "| Benchmark | M3 Kimi Prompt / Completion / Cache | M4 Kimi Prompt / Completion / Cache | Skill bytes |", "|---|---:|---:|---:|"]
+              "| Benchmark | M3 Kimi Prompt / Completion / Cache | M4 Kimi Prompt / Completion / Cache | M3/M4 调用与耗时 | Skill bytes |", "|---|---:|---:|---:|---:|"]
     for state in states:
         bench = state["benchmark"]
         base = root / "results/r1" / bench
@@ -192,7 +192,21 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
             return f"{totals['prompt_tokens']} / {totals['completion_tokens']} / {totals['cache_tokens']}"
         manifest = base / "m4/candidate_manifest.json"
         size = json.loads(manifest.read_text()).get("bytes", "—") if manifest.is_file() else "—"
-        lines.append(f"| {bench} | {usage('m3')} | {usage('m4')} | {size} |")
+        def effort(stage: str) -> tuple[int, float]:
+            path = base / stage / "usage.json"
+            if not path.is_file():
+                return 0, 0.0
+            calls = json.loads(path.read_text()).get("calls", [])
+            receipts = []
+            for call in calls:
+                digest = call["call_id"].rsplit("-", 1)[-1]
+                receipt = next((root / "results/r1/cache").glob(digest + "*.json"), None)
+                if receipt:
+                    receipts.append(json.loads(receipt.read_text())["usage"])
+            return len(receipts), round(sum(r.get("elapsed_sec", 0) for r in receipts), 1)
+        m3_count, m3_time = effort("m3")
+        m4_count, m4_time = effort("m4")
+        lines.append(f"| {bench} | {usage('m3')} | {usage('m4')} | {m3_count}/{m4_count} calls; {m3_time}/{m4_time}s | {size} |")
     lines += ["", "表中 Token 为产生当前版本的去重 API 收据用量；缓存命中的本次增量调用为零。模型完整请求、响应及服务端 usage 保存在 results/r1/cache；各阶段调用次数、重试和耗时见 usage.json。",
               "Val 逐题反馈只用于 diff 与 Gate，未反馈给 M3/M4。"]
     lines += ["", "## Val 耗时与错误", "",

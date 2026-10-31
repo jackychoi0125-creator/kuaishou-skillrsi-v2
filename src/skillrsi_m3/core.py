@@ -338,10 +338,18 @@ class EvidenceVerifier:
                 errors.append("unsupported_causal_upgrade")
             if insight["benchmark"] == "livemath" and any(w in insight["principle"].lower() for w in ("calculation error", "reasoning error", "计算错误", "推理错误")):
                 errors.append("math_root_requires_independent_proof")
-            insight["status"] = "verified_observation" if not errors else "rejected"
+            if errors:
+                insight["status"] = "rejected"
+            elif insight["benchmark"] == "livemath" and insight.get("extraction_method") != "deterministic_observed_behavior":
+                insight["status"] = "pending_math_validation"
+            else:
+                insight["status"] = "verified_observation"
             details.append({"insight_id": insight["insight_id"], "errors": errors,
+                            "status": insight["status"],
                             "independent_traces": len({r["trace_id"] for r in insight["supporting_refs"]})})
-        return {"verified": sum(not d["errors"] for d in details), "rejected": sum(bool(d["errors"]) for d in details),
+        return {"verified": sum(d["status"] == "verified_observation" for d in details),
+                "pending": sum(d["status"] == "pending_math_validation" for d in details),
+                "rejected": sum(bool(d["errors"]) for d in details),
                 "details": details}
 
 

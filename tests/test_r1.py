@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from skillrsi_m3.core import InsightConsolidator, TraceStore, observed_math_definition_check, run as run_m3
+from skillrsi_m3.core import EvidenceVerifier, InsightConsolidator, TraceStore, observed_math_definition_check, run as run_m3
 from skillrsi_m4.core import validate_skill, run as run_m4
 from skillrsi_loop.gate import compare
 
@@ -59,11 +59,16 @@ class R1Tests(unittest.TestCase):
             candidate = observed_math_definition_check(TraceStore(root / "trace_profiles.jsonl", "livemath"), root)
             self.assertEqual(candidate[0]["causal_status"], "hypothesis_only")
             self.assertEqual(candidate[0]["supporting_refs"][0]["event_ids"], ["s1.message"])
+            model_claim = {**candidate[0], "insight_id": "model-claim", "extraction_method": "llm"}
+            report = EvidenceVerifier(TraceStore(root / "trace_profiles.jsonl", "livemath")).verify([model_claim])
+            self.assertEqual(report["pending"], 1)
+            self.assertEqual(model_claim["status"], "pending_math_validation")
 
     def test_skill_static_checks(self):
         content = "---\nname: alfworld-r1\ndescription: Act on state feedback\n---\n# When to use\n# Procedure\n# Avoid\n# Validation\n"
         self.assertEqual(validate_skill(content, "alfworld", [{"benchmark": "alfworld"}]), [])
         self.assertIn("prohibited_content", validate_skill(content + "Go to countertop 1\n", "alfworld", [{"benchmark": "alfworld"}]))
+        self.assertIn("token_proxy_limit_exceeded", validate_skill(content + "word " * 1600, "alfworld", [{"benchmark": "alfworld"}]))
 
     def test_official_paired_gate_and_alignment(self):
         with tempfile.TemporaryDirectory() as temp:

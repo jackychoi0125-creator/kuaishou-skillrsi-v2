@@ -11,6 +11,7 @@ from skillrsi_m3.client import KimiClient
 from skillrsi_m3.core import write_json
 
 MAX_CHARS = 8000
+MAX_TOKEN_PROXY = 1500
 PROHIBITED = (r"(?i)api[_ -]?key", r"(?i)secret", r"(?i)golden", r"(?i)/bench/answers/",
               r"(?i)task[_ -]?id", r"(?i)ignore (all )?previous instructions",
               r"(?i)\b(?:countertop|cabinet|drawer|desk|table|shelf|fridge|microwave)\s+\d+\b",
@@ -38,6 +39,11 @@ def normalize_skill(text: str, benchmark: str) -> tuple[str, list[str]]:
     return text, changes
 
 
+def token_proxy(text: str) -> int:
+    """Conservative local size gate, never reported as API token usage."""
+    return len(re.findall(r"\w+|[^\w\s]", text))
+
+
 def validate_skill(text: str, benchmark: str, insights: list[dict[str, Any]]) -> list[str]:
     errors = []
     front = re.match(r"\A---\n(.*?)\n---\n", text, re.S)
@@ -50,6 +56,8 @@ def validate_skill(text: str, benchmark: str, insights: list[dict[str, Any]]) ->
             errors.append("missing_description")
     if len(text) > MAX_CHARS:
         errors.append("too_long")
+    if token_proxy(text) > MAX_TOKEN_PROXY:
+        errors.append("token_proxy_limit_exceeded")
     for heading in ("When to use", "Procedure", "Avoid", "Validation"):
         if not re.search(rf"(?im)^#+\s+.*{heading}", text):
             errors.append(f"missing_{heading.lower().replace(' ', '_')}")
@@ -135,6 +143,7 @@ def run(benchmark: str, m3_dir: Path, skill_root: Path, out_dir: Path,
     snapshot.write_bytes(skill_path.read_bytes())
     manifest = {"benchmark": benchmark, "status": "candidate", "skill_path": str(skill_path),
                 "snapshot_path": str(snapshot), "sha256": sha, "bytes": skill_path.stat().st_size,
+                "skill_token_proxy": token_proxy(markdown), "token_proxy_limit": MAX_TOKEN_PROXY,
                 "insight_ids": [i["insight_id"] for i in usable[:12]], "origin_llm_call_id": call_id,
                 "static_audit": "passed", "normalizations": normalizations}
     write_json(out_dir / "candidate_manifest.json", manifest)

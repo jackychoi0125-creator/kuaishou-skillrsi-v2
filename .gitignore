@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 data/train/
 results/m1/
+results/m2/
 results/*.log
 results/prepare-summary.json
 .env

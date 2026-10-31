@@ -8,5 +8,5 @@ setup(
     package_dir={"": "src"},
     packages=find_packages("src"),
     python_requires=">=3.9",
-    entry_points={"console_scripts": ["skillrsi-m1=skillrsi_m1.cli:main"]},
+    entry_points={"console_scripts": ["skillrsi-m1=skillrsi_m1.cli:main", "skillrsi-m2=skillrsi_m1.m2:main"]},
 )

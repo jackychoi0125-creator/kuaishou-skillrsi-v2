@@ -2,9 +2,11 @@
 
 当前正式合并版请看 `results/m1/audit.json` 和 `validated.jsonl`：154 条 Train 全部处理，154 条 Trace 有效，98 条成功、56 条失败。四条模型错误补跑的原始与最终 Trace 路径均在审计里。旧 `results/m1/records.jsonl` 和 `summary.json` 是原始运行的历史诊断，口径为 96 成功、54 有效任务失败、4 基础设施失败。
 
-新 M2 结果见 `results/m2/m2_summary.json`：98 条成功和 56 条失败都进入统一画像；当前生成 36 个正向策略候选组、30 个失败模式组、20 个分级正反配对，另有 36 条失败明确无合适正例。L2 在 30,000 Token 代理预算内深读 4 条成功、6 条失败，含 3 对正反对照；具体局部比较在 `l2_contrasts.json`。所有生成数据仍默认不纳入 Git。
+新 M2 结果见 `results/m2/m2_summary.json`：98 条成功和 56 条失败都进入统一画像；当前生成 36 个正向策略候选组、30 个失败模式组、18 个分级正反配对，另有 38 条失败明确无合适正例。L2 在 30,000 Token 代理预算内深读 4 条成功、7 条失败，含 2 对正反对照；具体局部比较在 `l2_contrasts.json`。三个 Benchmark 均有成功和失败抽样；LiveMath 因具体题意不足以比较，不强制配对。所有生成数据仍默认不纳入 Git。
 
-同一份原始 Train 输入上，旧 M2 的渐进上下文代理值为 99,953 Token，新流程的旧字段兼容视图连同 L2 对照为 80,939 Token，减少约 19.0%；正式合并版为 78,885 Token。此处均为字符长度估算，不是 API 计费。新流程 M1/M2 均未发起模型调用；旧 Judge 的 98,827 Prompt Token 与 33,874 Completion Token 仅作为历史证据导入。
+M3 前置审计见 `group_quality.json`、`evidence_audit.json` 和 `manual_spotcheck.md`：66 组中 38 组为单例、31 组与另一组相似度较高；10 组仅达到候选经验门槛。L2 的 11 条样本事件引用完整，9/9 个已支持根因事件及入选对照的差异事件全部保留；两条 LiveMath 长推导仍须回读原文。
+
+同一份原始 Train 输入上，旧 M2 的渐进上下文代理值为 99,953 Token，新流程的旧字段兼容视图连同 L2 对照为 75,449 Token，减少约 24.5%；正式合并版为 76,181 Token。此处均为字符长度估算，不是 API 计费。新流程 M1/M2 均未发起模型调用；旧 Judge 的 98,827 Prompt Token 与 33,874 Completion Token 仅作为历史证据导入。
 
 本地运行产物位于 `results/m1/`，默认不纳入 Git，因为 `evidence.excerpt` 会引用原始任务轨迹。运行 `skillrsi-m1 prepare` 和 `skillrsi-m1 diagnose --llm --workers 2` 可重新生成。
 

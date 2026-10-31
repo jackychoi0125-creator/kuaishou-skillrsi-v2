@@ -35,3 +35,9 @@ M2 的每条 `trace_profile` 使用相同的 `task_signature`、五维 `behavior
 新 M1/M2 默认均为确定性程序，新增模型调用和计费 Token 都为 0；M2 记录各阶段耗时、深读数量、视图长度比例和估算上下文 Token。旧 Judge 的 15 个案例、98,827 Prompt Token 和 33,874 Completion Token 被标为历史导入，不重复计费。L2 视图可按 `trace_id`、`event_id` 回取原文；超长 Agent 消息只保留分析相关的首尾内容，原始事件不删除。
 
 行为标签仍是规则观测，不等于有效策略；成功组是可复用策略**候选**。没有独立验证的数学根因继续保持 `undetermined`。匹配分数是排序启发式，B/C 级配对仍需后续独立验证，不能作为因果结论。
+
+## M3 前置质量门控
+
+`group_quality.json` 为每组报告成员数、代表轨迹、任务与行为一致性、最近邻组相似度、证据事件数和 `reuse_readiness`。单例固定为 `single_case_hypothesis`；即使多例一致，也仅可成为 `candidate_experience`，因果状态保持 `hypothesis_only`。
+
+`evidence_audit.json` 将本次入选 L2 的事件逐条与原始 ATIF 比对，统计已确认根因、正反差异和 ALFWorld 成功终态反馈的保留情况。三个 Benchmark 均尽量纳入成功、失败样本；LiveMath 不满足题意相似阈值时保留两类样本但不建立正反配对。长数学推导的视图会标记需要回读全文。

@@ -20,6 +20,8 @@ PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 
 新输出在 `results/m1/validated.jsonl`、`audit.json` 和 `results/m2/trace_profiles.jsonl`、`positive_strategy_groups.json`、`failure_pattern_groups.json`、`contrast_groups.json`、`l2_contrasts.json`、`m2_summary.json`、`deep_views/`。已有 `records.jsonl` 等历史文件不删除；M2 还生成旧字段的转换视图。完整数据流、Schema 和兼容性见 [DESIGN.md](DESIGN.md)。
 
+M3 前置质量审计输出 `results/m2/group_quality.json` 与 `evidence_audit.json`：统计单例、组内一致性、近似重复组、代表轨迹及复用准备状态，并把 L2 事件逐条与原始 ATIF 比对。单例组只保留为假设；成功轨迹中的重复动作也不会自动成为有效策略。LiveMath 弱相关题目不强制组成正反例。
+
 L2 预算用 `--max-deep-read-traces`、`--max-positive-traces`、`--max-negative-traces`、`--max-contrast-pairs`、`--max-llm-input-tokens` 调整；`--dry-run` 只统计不写文件。M2 默认不调用 LLM，`max_llm_input_tokens` 是准备给后续语义分析的视图长度代理预算，不是实际 API 消耗。原始事件可用 `skillrsi-m2 fetch --benchmark alfworld --task-id train__0017 --event-id s19.call4` 回查。
 
 ## 历史 M1 诊断（兼容）

@@ -8,6 +8,8 @@ from unittest.mock import patch
 from skillrsi_m1.core import events_from_trace, sha256
 from skillrsi_m1.m2_pipeline import deep_contrast, make_contrasts, match_pair, run, select_l2
 from skillrsi_m1.profiles import DIMENSIONS, profile_one
+from skillrsi_m1.quality import audit_groups
+from skillrsi_m1.evidence_audit import audit_views
 from skillrsi_m1.reliability import run as validate_run, validate_one
 
 
@@ -107,6 +109,37 @@ class UnifiedPipelineTests(unittest.TestCase):
         pairs, unmatched = make_contrasts([positive, math_failure])
         self.assertEqual(pairs, [])
         self.assertEqual(unmatched[0]["status"], "no_matched_positive")
+        math_success = profile("livemath", "livemath:s", "s", "success", "combinatorics",
+                               ["derive_answer", "select_option"], "complete graph red blue coloring Ramsey theorem")
+        different_graph_problem = profile("livemath", "livemath:f", "f", "failure", "combinatorics",
+                                          ["derive_answer", "select_option"], "maximal graph minor free clique sum structure")
+        self.assertEqual(match_pair(math_success, different_graph_problem)["reason"],
+                         "math_problem_content_not_comparable")
+
+    def test_singleton_group_cannot_be_promoted_as_general_rule(self):
+        p = profile("alfworld", "alfworld:p", "p", "success", "multi_stage_processing", ["pick", "clean"])
+        group = {"group_id": "positive_test", "benchmark": "alfworld", "task_family": "multi_stage_processing",
+                 "behavior_pattern": ["action:tool_calls_executed"], "trace_ids": [p["trace_id"]],
+                 "evidence_events": ["alfworld:p:s2.message"]}
+        result = audit_groups([p], [group], [], set())
+        self.assertEqual(result["groups"][0]["reuse_readiness"], "single_case_hypothesis")
+        self.assertEqual(result["groups"][0]["causal_status"], "hypothesis_only")
+
+    def test_evidence_audit_detects_missing_contrast_event(self):
+        p = profile("alfworld", "alfworld:p", "p", "success", "multi_stage_processing", ["pick", "clean"])
+        n = profile("alfworld", "alfworld:n", "n", "failure", "multi_stage_processing", ["pick", "clean"])
+        for item in (p, n):
+            item["diagnosis"].update({"critical_events": [], "root_cause_hypotheses": []})
+        events = {p["trace_id"]: [{"id": "s1.message", "step": 1, "kind": "message", "text": "act"}],
+                  n["trace_id"]: [{"id": "s1.message", "step": 1, "kind": "message", "text": "stop"}]}
+        views = [{"trace_id": p["trace_id"], "events": [{"event_id": "s1.message", "step_id": 1,
+                  "kind": "message", "content": "act", "compressed": False, "full_chars": 3}]},
+                 {"trace_id": n["trace_id"], "events": []}]
+        comparison = {"positive_trace_id": p["trace_id"], "negative_trace_id": n["trace_id"],
+                      "contrast_id": "pair", "differences": [{"positive_event_ids": ["s1.message"],
+                      "negative_event_ids": ["s1.message"]}]}
+        result = audit_views([p, n], events, views, [comparison])
+        self.assertEqual(result["summary"]["contrast_difference_event_retention"], 0)
 
     def test_l2_selects_positive_negative_and_pair(self):
         p = profile("alfworld", "alfworld:p", "p", "success", "multi_stage_processing", ["pick", "clean"])
@@ -116,6 +149,19 @@ class UnifiedPipelineTests(unittest.TestCase):
         selected, pair_ids = select_l2([p, n], [pair], 2, 1, 1, 1, 1000)
         self.assertEqual(set(selected), {p["trace_id"], n["trace_id"]})
         self.assertEqual(pair_ids, ["pair"])
+
+    def test_l2_keeps_math_success_and_failure_without_forced_pair(self):
+        sheet_p = profile("spreadsheetbench", "spreadsheetbench:p", "p", "success", "cell_level", ["formula"])
+        sheet_n = profile("spreadsheetbench", "spreadsheetbench:n", "n", "failure", "cell_level", ["formula"])
+        math_p = profile("livemath", "livemath:p", "p", "success", "combinatorics", ["derive_answer"],
+                         "Ramsey complete graph coloring")
+        math_n = profile("livemath", "livemath:n", "n", "failure", "combinatorics", ["derive_answer"],
+                         "maximal minor free graph structure")
+        pair = {"contrast_id": "sheet-pair", "positive_trace_id": sheet_p["trace_id"],
+                "negative_trace_id": sheet_n["trace_id"], "matching_grade": "C", "match_score": .6}
+        selected, pair_ids = select_l2([sheet_p, sheet_n, math_p, math_n], [pair], 4, 2, 2, 2, 5000)
+        self.assertEqual(set(selected), {item["trace_id"] for item in (sheet_p, sheet_n, math_p, math_n)})
+        self.assertEqual(pair_ids, ["sheet-pair"])
 
     def test_deep_contrast_cites_divergent_action_events(self):
         p = profile("alfworld", "alfworld:p", "p", "success", "multi_stage_processing", ["pick", "clean"])

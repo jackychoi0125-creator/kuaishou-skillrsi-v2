@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from .adapters import ADAPTERS
+from .core import BENCHMARKS
+from .evidence_audit import audit_views
 from .profiles import observed_labels, profile_one, validate_profile
+from .quality import audit_groups
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -52,7 +55,7 @@ def match_pair(positive: dict[str, Any], negative: dict[str, Any]) -> dict[str, 
     subtype = 1.0 if left["task_subtype"] == right["task_subtype"] else 0.0
     text = _jaccard(_tokens(positive["task_goal_excerpt"]), _tokens(negative["task_goal_excerpt"]))
     score = round(.3 * operations + .15 * constraints + .15 * complexity + .2 * subtype + .2 * text, 4)
-    if positive["benchmark"] == "livemath" and text < .12:
+    if positive["benchmark"] == "livemath" and text < .4:
         return {"grade": None, "score": score, "reason": "math_problem_content_not_comparable"}
     if operations >= .5 and score >= .65 and text >= .25:
         return {"grade": "B", "score": score, "reason": "similar_operations_constraints_and_complexity"}
@@ -183,11 +186,48 @@ def select_l2(profiles: list[dict[str, Any]], contrasts: list[dict[str, Any]],
                        isinstance(profile["diagnosis"]["confirmed_root_cause"], dict)]
     for profile in sorted(supported_roots, key=lambda item: item["trace_id"]):
         add(profile["trace_id"])
-    for pair in sorted(contrasts, key=lambda item: (-grade_order[item["matching_grade"]], -item["match_score"])):
+    ranked_pairs = sorted(contrasts, key=lambda item: (-grade_order[item["matching_grade"]], -item["match_score"]))
+    benchmark_first = [next((pair for pair in ranked_pairs if by_id[pair["positive_trace_id"]]["benchmark"] == benchmark), None)
+                       for benchmark in BENCHMARKS]
+    ordered_pairs = [pair for pair in benchmark_first if pair is not None]
+    ordered_pairs.extend(pair for pair in ranked_pairs if pair not in ordered_pairs)
+    seeded_benchmarks: set[str] = set()
+    for pair in ordered_pairs:
         if len(pair_ids) >= max_contrast_pairs:
             break
         p, n = pair["positive_trace_id"], pair["negative_trace_id"]
+        benchmark = by_id[p]["benchmark"]
+        if benchmark in seeded_benchmarks:
+            continue
         # Avoid half a pair when either side is over budget.
+        if p not in selected and n not in selected and (len(selected) + 2 > max_deep_read_traces or
+            counts["success"] >= max_positive_traces or counts["failure"] >= max_negative_traces or
+            estimated + cost(p) + cost(n) > max_llm_input_tokens):
+            continue
+        if add(p) and add(n):
+            pair_ids.append(pair["contrast_id"])
+            seeded_benchmarks.add(benchmark)
+    for benchmark in BENCHMARKS:
+        if benchmark in seeded_benchmarks:
+            continue
+        available_positive = [item for item in profiles if item["benchmark"] == benchmark and
+                              item["eligible_for_learning"] and item["outcome"]["status"] == "success"]
+        available_negative = [item for item in profiles if item["benchmark"] == benchmark and
+                              item["eligible_for_learning"] and item["outcome"]["status"] == "failure"]
+        if available_positive and available_negative:
+            candidates = [(match_pair(p, n)["score"], p, n) for p in available_positive for n in available_negative]
+            _, p, n = max(candidates, key=lambda item: (item[0], -cost(item[1]["trace_id"])-cost(item[2]["trace_id"])))
+            if (len(selected) + int(p["trace_id"] not in selected) + int(n["trace_id"] not in selected) <= max_deep_read_traces
+                    and counts["success"] < max_positive_traces and counts["failure"] < max_negative_traces
+                    and estimated + cost(p["trace_id"]) + cost(n["trace_id"]) <= max_llm_input_tokens):
+                add(p["trace_id"])
+                add(n["trace_id"])
+    for pair in ordered_pairs:
+        if len(pair_ids) >= max_contrast_pairs:
+            break
+        p, n = pair["positive_trace_id"], pair["negative_trace_id"]
+        if pair["contrast_id"] in pair_ids:
+            continue
         if p not in selected and n not in selected and (len(selected) + 2 > max_deep_read_traces or
             counts["success"] >= max_positive_traces or counts["failure"] >= max_negative_traces or
             estimated + cost(p) + cost(n) > max_llm_input_tokens):
@@ -222,6 +262,10 @@ def deep_view(profile: dict[str, Any], events: list[dict[str, Any]], contrast_ev
     first_agent = next((event["id"] for event in events if event["kind"] == "message" and event.get("source") == "agent"), None)
     last_agent = next((event["id"] for event in reversed(events) if event["kind"] == "message" and event.get("source") == "agent"), None)
     critical.update(event_id for event_id in (first_agent, last_agent) if event_id)
+    last_observation = next((event for event in reversed(events) if event["kind"] == "observation"), None)
+    if last_observation:
+        critical.add(last_observation["id"])
+        critical.add(last_observation["id"].replace(".obs", ".call"))
     selected_events = []
     for event in events:
         if event["id"] not in critical:
@@ -238,6 +282,7 @@ def deep_view(profile: dict[str, Any], events: list[dict[str, Any]], contrast_ev
                                 "compressed": compressed, "full_chars": len(event["text"])})
     return {"trace_id": profile["trace_id"], "source_trace_path": profile["source_trace_path"],
             "trace_sha256": profile["trace_sha256"], "task_signature": profile["task_signature"],
+            "task_goal_excerpt": profile["task_goal_excerpt"],
             "outcome": profile["outcome"]["status"], "event_count": len(events),
             "selected_event_count": len(selected_events), "events": selected_events}
 
@@ -306,9 +351,14 @@ def run(validated_path: Path, legacy_path: Path | None, output_dir: Path, *,
     for pair in contrasts:
         if pair["contrast_id"] not in selected_pairs:
             continue
-        for item in pair["common_behaviors"][:2] + pair["behavior_differences"][:3]:
+        comparison = deep_contrast(pair, by_id[pair["positive_trace_id"]], by_id[pair["negative_trace_id"]],
+                                   events_cache[pair["positive_trace_id"]], events_cache[pair["negative_trace_id"]])
+        for item in pair["common_behaviors"][:2]:
             evidence_by_trace[pair["positive_trace_id"]].update(item["positive_event_ids"][:2])
             evidence_by_trace[pair["negative_trace_id"]].update(item["negative_event_ids"][:2])
+        for item in comparison["differences"]:
+            evidence_by_trace[pair["positive_trace_id"]].update(item["positive_event_ids"])
+            evidence_by_trace[pair["negative_trace_id"]].update(item["negative_event_ids"])
     views = [deep_view(by_id[trace_id], events_cache[trace_id], evidence_by_trace[trace_id]) for trace_id in selected]
     pair_by_id = {pair["contrast_id"]: pair for pair in contrasts}
     while selected and sum(len(json.dumps(view, ensure_ascii=False)) for view in views) > 4 * max_llm_input_tokens:
@@ -340,6 +390,11 @@ def run(validated_path: Path, legacy_path: Path | None, output_dir: Path, *,
                  if isinstance(profile["diagnosis"]["confirmed_root_cause"], dict)
                  for event_id in profile["diagnosis"]["confirmed_root_cause"]["event_ids"]}
     retained = {f"{view['trace_id']}:{event['event_id']}" for view in views for event in view["events"]}
+    group_quality = audit_groups(profiles, positive, failure, set(selected))
+    evidence_quality = audit_views(profiles, events_cache, views, deep_comparisons)
+    quality_by_id = {item["group_id"]: item for item in group_quality["groups"]}
+    for group in positive + failure:
+        group["quality"] = quality_by_id[group["group_id"]]
     legacy_judged = [row for row in legacy.values() if row.get("judge_input_tokens") is not None]
     summary = {"schema_version": "2.0", "input_traces": len(validated),
                "eligible_success": sum(profile["eligible_for_learning"] and profile["outcome"]["status"] == "success" for profile in profiles),
@@ -350,6 +405,8 @@ def run(validated_path: Path, legacy_path: Path | None, output_dir: Path, *,
                    and bool(profile["diagnosis"]["observed_symptoms"]) for profile in profiles),
                "ineligible": [profile["trace_id"] for profile in profiles if not profile["eligible_for_learning"]],
                "positive_strategy_groups": len(positive), "failure_pattern_groups": len(failure),
+               "group_quality": group_quality["summary"],
+               "evidence_audit": evidence_quality["summary"],
                "contrast_pairs": len(contrasts), "contrast_grades": dict(Counter(item["matching_grade"] for item in contrasts)),
                "no_matched_positive": len(rejected), "deep_read_traces": len(views),
                "deep_read_success": sum(by_id[trace_id]["outcome"]["status"] == "success" for trace_id in selected),
@@ -373,6 +430,8 @@ def run(validated_path: Path, legacy_path: Path | None, output_dir: Path, *,
         _write_jsonl(output_dir / "trace_profiles.jsonl", profiles)
         _write_json(output_dir / "positive_strategy_groups.json", positive)
         _write_json(output_dir / "failure_pattern_groups.json", failure)
+        _write_json(output_dir / "group_quality.json", group_quality)
+        _write_json(output_dir / "evidence_audit.json", evidence_quality)
         _write_json(output_dir / "contrast_groups.json", contrast_groups)
         _write_json(output_dir / "l2_contrasts.json", deep_comparisons)
         _write_json(output_dir / "m2_summary.json", summary)

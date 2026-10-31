@@ -12,6 +12,7 @@ dependencies = []
 [project.scripts]
 skillrsi-m1 = "skillrsi_m1.cli:main"
 skillrsi-m2 = "skillrsi_m1.m2:main"
+skillrsi-loop = "skillrsi_loop.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

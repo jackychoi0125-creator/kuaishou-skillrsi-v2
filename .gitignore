@@ -6,6 +6,8 @@ __pycache__/
 data/train/
 results/m1/
 results/m2/
+results/r1/
+workspace/
 results/*.log
 results/prepare-summary.json
 .env

@@ -1,5 +1,13 @@
 # SkillRSI v2 — 统一正反轨迹画像与对照分析
 
+## R1 自进化闭环
+
+`skillrsi-loop r1 --benchmark all --mode real --resume` 顺序执行每个 Benchmark 的 M3 经验提取、M4 单候选 Skill 生成、官方 Harbor Val 基线复测、候选评测和逐题门控。可用 `--stop-after m3|m4|baseline|candidate` 中断，用 `--resume` 幂等恢复。`--mode dry-run` 只检查可选证据，不产生模型调用或虚构分数。
+
+M3 只读取 `results/m2/` 中的 Train 画像、分组和原始 Trace 引用。它验证源文件 SHA-256 与 event ID，单例保留为假设；M3/M4 的 Kimi 原始请求、响应、服务端 usage、重试和耗时存放在忽略提交的 `results/r1/cache/`。M4 只消费已核验 Insight，产生 `workspace/skills/<benchmark>/r1/<skill-name>/SKILL.md` 与版本快照。无可信经验时写 `no_candidate` 并停止该 Benchmark 的候选评测。
+
+Val 运行只使用官方 Harbor 评分。`results/r1/<benchmark>/val/diff.csv` 与 `acceptance.json` 对齐同一 task_id；缺题、配置不一致、评分异常会阻止接纳。门控要求净提升大于零且无回退题。旧参考分数不直接当作当前配对基线。`results/r1/RUN_REPORT.md` 汇总实际运行结果。生成产物和原始 Trace 均被 `.gitignore` 排除。
+
 本仓库实现 Trace2Skill 的 M1 和 M2：M1 对三个 Benchmark 的 Train Trace 做确定性可靠性与结果审计；M2 对成功和失败轨迹采用同一任务、行为、结果、诊断 Schema，生成正向策略候选、失败模式和分级正反对照。正式 Train Baseline 的 154 条任务包含 98 成功、56 失败；M2 不把 reward=0 自动解释为某个推理错误。
 
 ## 输入与运行

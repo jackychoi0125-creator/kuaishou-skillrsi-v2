@@ -228,8 +228,8 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
     lines += ["", "表中 Token 为产生当前版本的去重 API 收据用量；缓存命中的本次增量调用为零。模型完整请求、响应及服务端 usage 保存在 results/r1/cache；各阶段调用次数、重试和耗时见 usage.json。",
               "Val 逐题反馈只用于 diff 与 Gate，未反馈给 M3/M4。"]
     lines += ["", "## Val 耗时与错误", "",
-              "| Benchmark | Baseline wall sec | Candidate wall sec | Baseline / Candidate errors | Baseline / Candidate input tokens |",
-              "|---|---:|---:|---:|---:|"]
+              "| Benchmark | Baseline wall sec | Candidate wall sec | Baseline / Candidate errors | Input tokens B / R1 | Output tokens B / R1 |",
+              "|---|---:|---:|---:|---:|---:|"]
     for state in states:
         gate = state["stages"].get("gate")
         if not gate:
@@ -238,7 +238,8 @@ def report(root: Path, states: list[dict[str, Any]]) -> Path:
         cand = json.loads((Path(gate["candidate_job"]) / "summary.json").read_text())
         lines.append(f"| {state['benchmark']} | {base.get('wall_sec', '—')} | {cand.get('wall_sec', '—')} | "
                      f"{base.get('errors', '—')} / {cand.get('errors', '—')} | "
-                     f"{base.get('input_tokens', '—')} / {cand.get('input_tokens', '—')} |")
+                     f"{base.get('input_tokens', '—')} / {cand.get('input_tokens', '—')} | "
+                     f"{base.get('output_tokens', '—')} / {cand.get('output_tokens', '—')} |")
     lines += ["", "M1/M2 使用已有 Train 产物，本轮未新增 M1/M2 模型调用。拒绝的候选保留审计文件，当前版本指向无 Skill 基线。"]
     path = root / "results/r1/RUN_REPORT.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

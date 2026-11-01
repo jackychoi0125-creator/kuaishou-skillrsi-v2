@@ -139,6 +139,7 @@ def _run_harbor(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | N
 
 def _run_once(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | None,
               n: int, seed: int) -> Path:
+    timeout_seconds = 1800 if benchmark == "alfworld" else 900
     jobs_root.parent.mkdir(parents=True, exist_ok=True)
     if jobs_root.is_dir() and any(jobs_root.iterdir()):
         raise ValueError(f"incomplete populated jobs directory requires inspection: {jobs_root}")
@@ -151,7 +152,7 @@ def _run_once(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | Non
     with log.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(args, cwd=kit, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            code = process.wait(timeout=900)
+            code = process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             os.killpg(process.pid, signal.SIGTERM)
             try:
@@ -159,7 +160,7 @@ def _run_once(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | Non
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-            raise TimeoutError(f"Train ablation timed out after 900 seconds; see {log}") from exc
+            raise TimeoutError(f"Train ablation timed out after {timeout_seconds} seconds; see {log}") from exc
     if code:
         raise RuntimeError(f"Train ablation {benchmark} failed, exit {code}; see {log}")
     job = _job(jobs_root)

@@ -15,6 +15,8 @@ skillrsi-m2 = "skillrsi_m1.m2:main"
 skillrsi-loop = "skillrsi_loop.cli:main"
 skillrsi-audit-r1 = "skillrsi_loop.triage:main"
 skillrsi-ablate-train = "skillrsi_loop.ablation:main"
+skillrsi-stability = "skillrsi_loop.stability:main"
+skillrsi-select-rules = "skillrsi_loop.rule_selection:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

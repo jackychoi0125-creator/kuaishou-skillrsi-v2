@@ -8,6 +8,8 @@ results/m1/
 results/m2/
 results/r1/
 results/train_ablation/
+results/stability/
+results/r2/
 workspace/
 results/*.log
 results/prepare-summary.json

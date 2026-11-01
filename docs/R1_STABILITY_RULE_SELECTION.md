@@ -25,3 +25,17 @@ SpreadsheetBench has a separate, prespecified Train interaction study. `skillrsi
 `skillrsi-select-rules` reads only Train stability outputs and frozen R1 Train Insights. Its policy is frozen before pilot results in `RULE_SELECTION_POLICY.json`. A rule needs repeated improvement over B on at least two distinct tasks, acceptable Token/time cost, no observed paired regression, a clear Train Insight trigger, and clean Train internal validation. A/B presence effects and A/A natural variation remain separate from the D1/B comparison.
 
 R1 M2 and M3 used all original Train traces. Replaying those Train tasks is therefore `in_sample_diagnostic_only`. `crossfit_audit` flags any proposed holdout already present in the original M2 profile/group path and fails closed when cache isolation is unverified. If no rule clears the policy and clean cross-fitting gate, the selector emits `no_candidate`, skips R2 generation and Val, and leaves the existing zero-regression Val Gate unchanged. Val trajectories and answers never enter this controller or selector.
+
+## First official Train pilot (2026-11-02)
+
+The frozen four-task, two-repeat pilot completed all A/B/D1 arms on each Benchmark. Scores below are official Harbor successes out of four tasks per repeat. Each Benchmark has four distinct tasks, not eight independent tasks.
+
+| Benchmark | A repeats | B repeats | D1 repeats | D1/B input Token ratio | D1 decision |
+|---|---:|---:|---:|---:|---|
+| SpreadsheetBench | 3/4, 4/4 | 3/4, 4/4 | 4/4, 4/4 | 1.13 | `needs_more_evidence` |
+| ALFWorld | 3/4, 3/4 | 4/4, 3/4 | 3/4, 3/4 | 1.15 | `regression_risk` |
+| LiveMath | 2/4, 2/4 | 0/4, 2/4 | 1/4, 2/4 | 2.43 | `high_cost` |
+
+ALFWorld D1 regressed on a paired Train task and took 1.70 times B's duration in aggregate. LiveMath A/A changed outcomes on two of four tasks despite equal repeat totals; B changed from 0/4 to 2/4. SpreadsheetBench D1's aggregate 8/8 included no task with a repeated D1-over-B improvement across both runs. Its separate C/D2 interaction check yielded C=8/8 and D2=8/8 on the same four Train tasks, so the old three-task C regression did not replicate in this pilot; generated scripts differed in every paired task-run.
+
+The pilot and C/D2 check used 88 official Harbor task executions, 7,561,443 input Tokens and 653,249 output Tokens. No infrastructure retry occurred. These are observed, in-sample diagnostics, not independent generalization gains. No rule met the prespecified promotion and clean cross-fitting requirements; no R2 Skill or new Val run was produced. Local ignored reports under `results/stability/` contain the Run paths, per-task official scores, paired differences, cost distributions, and source hashes.

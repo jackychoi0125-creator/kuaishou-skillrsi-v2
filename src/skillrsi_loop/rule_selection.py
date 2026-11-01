@@ -274,6 +274,52 @@ def run(root: Path) -> list[dict[str, Any]]:
               "No candidate means no R2 Skill or new Val run. The official R1 Val gate remains unchanged.", ""]
     report = root / "results/stability/RULE_SELECTION_REPORT.md"
     report.write_text("\n".join(lines), encoding="utf-8")
+    summary_paths = [root / "results/stability" / benchmark / "stability_summary.json"
+                     for benchmark in ("spreadsheetbench", "alfworld", "livemath")]
+    summaries = {path.parent.name: json.loads(path.read_text()) for path in summary_paths if path.is_file()}
+    pilot_usage = {key: sum(summary["budget_usage"][key] for summary in summaries.values())
+                   for key in ("harbor_task_executions", "input_tokens", "output_tokens", "wall_seconds")}
+    interaction_manifest = root / "results/stability/spreadsheetbench/interaction_runs_manifest.json"
+    interaction_runs = json.loads(interaction_manifest.read_text())["runs"] if interaction_manifest.is_file() else {}
+    interaction_attempts = [attempt for record in interaction_runs.values() for attempt in record["attempts"]]
+    total_usage = {key: pilot_usage[key] + sum(
+        (len(attempt.get("rows", [])) if key == "harbor_task_executions" else
+         sum(row[key] for row in attempt.get("rows", [])) if key in ("input_tokens", "output_tokens") else
+         attempt.get("elapsed_sec", 0)) for attempt in interaction_attempts)
+        for key in pilot_usage}
+    run_lines = ["# R1 stability execution report", "",
+                 "All new official scores below come from frozen Train task sets; original R1 Val is read-only.",
+                 f"Pilot plan SHA: `{experiment_plan['plan_sha256']}`. Rule policy SHA: `{policy['policy_sha256']}`.", "",
+                 "| Benchmark | A repeats | B repeats | D1 repeats | A/A changed tasks | D1 status |",
+                 "|---|---:|---:|---:|---:|---|"]
+    for item in results:
+        summary = summaries.get(item["benchmark"])
+        if not summary:
+            run_lines.append(f"| {item['benchmark']} | pending | pending | pending | pending | {item['status']} |")
+            continue
+        scores = [", ".join(f"{round(rate * 4)}/4" for rate in summary["per_arm"][arm]["repeat_success_rates"])
+                  for arm in ("A", "B", "D1")]
+        changed = sum(bool(x["changed"]) for x in summary["a_a_variation"])
+        run_lines.append(f"| {item['benchmark']} | {scores[0]} | {scores[1]} | {scores[2]} | {changed} | {item['status']} |")
+    run_lines += ["", "Pilot: " + ", ".join(f"{key}={round(value, 3)}" for key, value in pilot_usage.items()) + ".",
+                  "Pilot plus Spreadsheet C/D2 interaction: " + ", ".join(
+                      f"{key}={round(value, 3)}" for key, value in total_usage.items()) + ".",
+                  "See local manifests for all Run paths, skill hashes, config hashes, scorer hashes, and attempts.",
+                  f"Incomplete Benchmark pilots: {', '.join(b for b, s in summaries.items() if s['status'] != 'complete') or 'none'}. "
+                  f"Missing summaries: {', '.join(sorted(set(('spreadsheetbench', 'alfworld', 'livemath')) - set(summaries))) or 'none'}.",
+                  "Recorded infrastructure error attempts: " + str(sum(len(s.get("error_attempts", [])) for s in summaries.values()) +
+                  sum(a.get("status") != "valid" for a in interaction_attempts)) + ".", "",
+                  "## Decision", "",
+                  "No D1 rule passed the prespecified Train performance, repeatability, cost, and clean cross-fitting gates."
+                  if all(item["status"] != "promote_candidate" for item in results) else
+                  "At least one rule requires separate clean Train validation before R2 generation.",
+                  "No stratified Train extension, R2 Skill, internal R2 validation, or new official Val run was performed."
+                  if all(item["status"] != "promote_candidate" for item in results) else
+                  "See per-rule manifests for the next internal validation stage.",
+                  "The R1 Val gate and no-Skill best version are unchanged. Pilot comparisons are in-sample diagnostics.",
+                  "Possible explanations for score differences include model sampling, Skill presence, explicit rule use, "
+                  "and run-time path variation; this pilot does not identify their causal shares.", ""]
+    (root / "results/stability/RUN_REPORT.md").write_text("\n".join(run_lines), encoding="utf-8")
     write_json(root / "results/stability/RULE_SELECTION.json", results)
     for item in results:
         out = root / "results/r2" / item["benchmark"]

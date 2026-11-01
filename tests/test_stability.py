@@ -297,6 +297,7 @@ class StabilityTests(unittest.TestCase):
                 "C": {"skill_path": str(skill), "skill_sha256": file_sha(skill)},
                 "D2": {"skill_path": str(skill), "skill_sha256": file_sha(skill)}}}))
             result = run_interaction(root, dry_run=True)
+            self.assertEqual(run_interaction(root, dry_run=True), result)
             self.assertEqual(result["model_calls"], 0)
             self.assertIsNone(result["official_scores"])
             self.assertFalse((out / "interaction_runs_manifest.json").exists())

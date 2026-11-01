@@ -29,7 +29,7 @@ def prepare(root: Path) -> dict[str, Any]:
         raise ValueError("interaction tasks must include prior Train diagnostic tasks")
     plan = {"schema_version": 1, "benchmark": BENCHMARK, "split": "train",
             "pilot_plan_sha256": main["plan_sha256"], "study": study,
-            "run_order": list(ORDER), "budget": INTERACTION_BUDGET,
+            "run_order": [list(item) for item in ORDER], "budget": INTERACTION_BUDGET,
             "hypothesis": "full R1 rule combination may alter execution more than isolated D1/D2",
             "source": "prior Train A/B/C/D; no Val task feedback"}
     plan["plan_sha256"] = digest(plan)

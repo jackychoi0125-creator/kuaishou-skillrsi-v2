@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -121,7 +122,7 @@ def _healthy(job: Path) -> bool:
 
 
 def _run_harbor(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | None,
-                n: int, seed: int) -> Path:
+                n: int, seed: int, id_file: Path | None = None) -> Path:
     for attempt in range(3):
         candidate = jobs_root if attempt == 0 else jobs_root.with_name(jobs_root.name + f"-retry{attempt}")
         existing = _job(candidate)
@@ -130,7 +131,7 @@ def _run_harbor(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | N
         if existing:
             continue
         try:
-            return _run_once(kit, benchmark, candidate, skills_dir, n, seed)
+            return _run_once(kit, benchmark, candidate, skills_dir, n, seed, id_file)
         except (RuntimeError, TimeoutError):
             if attempt == 2:
                 raise
@@ -138,7 +139,7 @@ def _run_harbor(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | N
 
 
 def _run_once(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | None,
-              n: int, seed: int) -> Path:
+              n: int, seed: int, id_file: Path | None = None) -> Path:
     timeout_seconds = 1800 if benchmark == "alfworld" else 900
     jobs_root.parent.mkdir(parents=True, exist_ok=True)
     if jobs_root.is_dir() and any(jobs_root.iterdir()):
@@ -148,6 +149,8 @@ def _run_once(kit: Path, benchmark: str, jobs_root: Path, skills_dir: Path | Non
             "--reasoning", "off", "--jobs-dir", str(jobs_root)]
     if skills_dir:
         args += ["--skills-dir", str(skills_dir)]
+    if id_file:
+        args += ["--id-file", str(id_file)]
     log = jobs_root.with_name(jobs_root.name + "-controller.log")
     with log.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(args, cwd=kit, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
@@ -243,13 +246,31 @@ def summarize(root: Path, benchmark: str, out_dir: Path, jobs: dict[str, Path], 
 
 
 def run_one(root: Path, benchmark: str, *, n: int = 3, seed: int = 0,
-            dry_run: bool = False, resume: bool = True, stop_after: str | None = None) -> dict[str, Any]:
+            dry_run: bool = False, resume: bool = True, stop_after: str | None = None,
+            label: str = "default", id_file: Path | None = None) -> dict[str, Any]:
+    if not re.fullmatch(r"[a-z0-9_-]+", label):
+        raise ValueError("invalid ablation label")
+    selected_ids = None
+    if id_file:
+        if benchmark != "livemath":
+            raise ValueError("explicit Train ID selection is currently supported for LiveMath only")
+        payload = json.loads(id_file.read_text())
+        selected_ids = payload.get("ids") if isinstance(payload, dict) else payload
+        if not isinstance(selected_ids, list) or len(selected_ids) != n or len(set(selected_ids)) != n:
+            raise ValueError("id_file must contain exactly n distinct task IDs")
+        with (root.parent / "metrics" / f"{benchmark}-baseline.csv").open(newline="", encoding="utf-8") as source:
+            train_ids = {row["task_id"] for row in csv.DictReader(source) if row["split"] == "train"}
+        if not set(selected_ids).issubset(train_ids):
+            raise ValueError("id_file contains a non-Train task")
     out = root / "results/train_ablation" / benchmark
+    if label != "default":
+        out = out / label
     out.mkdir(parents=True, exist_ok=True)
     arms = prepare_arms(root, benchmark, out)
     state_path = out / "stage_manifest.json"
-    state = json.loads(state_path.read_text()) if resume and state_path.is_file() else {"benchmark": benchmark, "n": n, "seed": seed, "jobs": {}}
-    if state["n"] != n or state["seed"] != seed:
+    selection_sha = hashlib.sha256(json.dumps(selected_ids, sort_keys=True).encode()).hexdigest() if selected_ids else None
+    state = json.loads(state_path.read_text()) if resume and state_path.is_file() else {"benchmark": benchmark, "n": n, "seed": seed, "selection_sha256": selection_sha, "jobs": {}}
+    if state["n"] != n or state["seed"] != seed or state.get("selection_sha256") != selection_sha:
         raise ValueError("resume configuration differs from prior Train ablation")
     if dry_run:
         return {"benchmark": benchmark, "mode": "dry_run", "arms": list(arms),
@@ -259,11 +280,11 @@ def run_one(root: Path, benchmark: str, *, n: int = 3, seed: int = 0,
     for arm in ARMS:
         if arm in state["jobs"] and _healthy(Path(state["jobs"][arm])):
             continue
-        jobs_root = kit / "workspace/runs" / (benchmark + "-train") / "r1-ablation" / arm
+        jobs_root = kit / "workspace/runs" / (benchmark + "-train") / ("r1-ablation" if label == "default" else f"r1-ablation-{label}") / arm
         started = time.monotonic()
         job = _run_harbor(kit, benchmark, jobs_root,
                           Path(arms[arm]["skills_dir"]) if arms[arm]["skills_dir"] else None,
-                          n, seed)
+                          n, seed, id_file)
         state["jobs"][arm] = str(job)
         state.setdefault("elapsed_sec", {})[arm] = round(time.monotonic() - started, 3)
         write_json(state_path, state)
@@ -309,14 +330,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--stop-after", choices=ARMS)
+    parser.add_argument("--label", default="default")
+    parser.add_argument("--id-file", type=Path)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     args = parser.parse_args(argv)
     for benchmark in BENCHMARKS if args.benchmark == "all" else (args.benchmark,):
         result = run_one(args.root.resolve(), benchmark, n=args.n, seed=args.seed,
-                         dry_run=args.dry_run, resume=args.resume, stop_after=args.stop_after)
+                         dry_run=args.dry_run, resume=args.resume, stop_after=args.stop_after,
+                         label=args.label, id_file=args.id_file.resolve() if args.id_file else None)
         print(json.dumps({"benchmark": benchmark, "completed_arms": list(result.get("jobs", {})),
                           "mode": result.get("mode", "real")}, ensure_ascii=False), flush=True)
-    if not args.dry_run:
+    if not args.dry_run and args.label == "default":
         render_report(args.root.resolve(), tuple(BENCHMARKS if args.benchmark == "all" else (args.benchmark,)))
 
 

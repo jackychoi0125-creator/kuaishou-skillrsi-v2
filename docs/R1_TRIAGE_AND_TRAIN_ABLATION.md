@@ -19,6 +19,8 @@ Run `skillrsi-ablate-train --benchmark all --n 3 --seed 0 --resume` to execute t
 
 The controller writes stage manifests, official trial paths, `paired_train.csv`, and `summary.json` under ignored `results/train_ablation/<benchmark>/`. It checks that all arms contain the same task IDs, every ID belongs to Train, each result has a matching official score, and raw trajectories exist. It does not ingest Val audit data. This is a small diagnostic sample with one replay per arm; a score difference is not a causal estimate.
 
+When a random LiveMath subset contains no baseline success, a separate Train-only success probe can use `--label success_probe --id-file <json-list>`. The controller verifies every ID against the Train metrics before preparing skills or calling the Kit. The label gives the probe distinct output and job directories, leaving the first study intact. Prior Train baseline rewards may guide probe selection; Val results may not.
+
 ## Next-round rule governance
 
 M3 records independent supporting traces, counterexamples, semantic support status, and risk level. Insights with contradictory trigger and avoid conditions remain separate and are marked high risk. M4 excludes high-risk insights, maps generated directives to Train Insight IDs in the candidate manifest, and rejects unmapped directives when several insights could be responsible. Static safety checks target answer leakage and secrets without rejecting ordinary words such as “search” or “secret” in benign contexts. The Gate adds trace, explicit Skill-read and cost diagnostics while preserving R1's official reward and zero-regression acceptance rule. Its stability field remains `unmeasured` for a single run.

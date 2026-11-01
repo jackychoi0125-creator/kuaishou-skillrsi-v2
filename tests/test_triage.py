@@ -5,7 +5,7 @@ from pathlib import Path
 
 from skillrsi_m3.core import EvidenceVerifier, InsightConsolidator
 from skillrsi_m4.core import rule_evidence_map, validate_skill
-from skillrsi_loop.ablation import _healthy, prepare_arms
+from skillrsi_loop.ablation import _healthy, prepare_arms, run_one as run_ablation
 from skillrsi_loop.triage import (_alf_summary, _script_diff, _skill_reads,
                                   first_behavior_divergence, first_divergence, milestones)
 
@@ -141,6 +141,20 @@ class TriageTests(unittest.TestCase):
             (job / "summary.csv").write_text(
                 "qid,reward,model_error,exception\nx,1.0,False,False\n")
             self.assertTrue(_healthy(job))
+
+    def test_explicit_ablation_ids_reject_val_before_skill_or_model_access(self):
+        with tempfile.TemporaryDirectory() as temp:
+            parent = Path(temp)
+            root = parent / "repo"
+            root.mkdir()
+            metrics = parent / "metrics"
+            metrics.mkdir()
+            (metrics / "livemath-baseline.csv").write_text(
+                "task_id,split\ntrain-1,train\nval-1,val\n")
+            ids = parent / "ids.json"
+            ids.write_text(json.dumps(["val-1"]))
+            with self.assertRaisesRegex(ValueError, "non-Train"):
+                run_ablation(root, "livemath", n=1, dry_run=True, label="balanced", id_file=ids)
 
 
 if __name__ == "__main__":

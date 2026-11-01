@@ -75,11 +75,24 @@ class EvidenceSelector:
                          "single_case_hypothesis": 1}.get(readiness, 0)
                 if not score:
                     continue
-                groups.append({**group, "kind": kind, "selection_score": score * 10 +
-                               min(len(set(group["trace_ids"])), 5) +
-                               min(quality.get("evidence_event_count") or 0, 20) / 20 +
-                               (10 if benchmark == "livemath" and kind == "positive" and
-                                "verification:agent_reported_result_check" in group.get("behavior_pattern", []) else 0)})
+                trace_ids = set(group["trace_ids"]) & self.store.profiles.keys()
+                if not trace_ids:
+                    continue
+                cost_chars = sum((self.store.profiles[t].get("outcome", {}).get("metrics", {}) or {}).get("trace_chars") or 0
+                                 for t in trace_ids)
+                coverage = len({self.store.profiles[t].get("task_signature", {}).get("task_subtype", "unknown")
+                                for t in trace_ids})
+                # Readiness reflects M2 group quality; independent traces and task coverage
+                # raise priority, while costly evidence and recorded counterexamples lower it.
+                rank = score * 10 + min(len(trace_ids), 5) * 2 + min(coverage, 4)
+                rank += min(quality.get("evidence_event_count") or 0, 20) / 20
+                rank -= min(cost_chars / 100000, 5)
+                rank -= 4 * len(quality.get("counterexample_trace_ids") or [])
+                groups.append({**group, "kind": kind, "selection_score": rank,
+                               "selection_factors": {"independent_traces": len(trace_ids),
+                                                     "task_subtype_coverage": coverage,
+                                                     "analysis_cost_trace_chars": cost_chars,
+                                                     "counterexample_traces": len(quality.get("counterexample_trace_ids") or [])}})
         for pair in read_json(self.m2_dir / "contrast_groups.json"):
             positive, negative = pair.get("positive_trace_id"), pair.get("negative_trace_id")
             if positive not in self.store.profiles or negative not in self.store.profiles:
@@ -297,8 +310,19 @@ class InsightConsolidator:
                 words = set(key.split())
                 prior = set(other["principle"].lower().split())
                 return len(words & prior) / len(words | prior) >= .85 if words and prior else False
+            def conditions_conflict(other: dict[str, Any]) -> bool:
+                normalize = lambda values: {" ".join(v.lower().split()) for v in values}
+                return bool(normalize(insight.get("trigger_conditions", [])) & normalize(other.get("avoid_conditions", [])) or
+                            normalize(other.get("trigger_conditions", [])) & normalize(insight.get("avoid_conditions", [])))
+            for prior in pool:
+                if similar(prior) and conditions_conflict(prior):
+                    operations.append({"operation": "CONFLICT", "insight_id": prior["insight_id"],
+                                       "source_insight_id": insight["insight_id"],
+                                       "reason": "trigger_avoid_overlap"})
+                    insight["risk_level"] = "high"
+                    prior["risk_level"] = "high"
             match = next((x for x in pool if similar(x)), None)
-            if match:
+            if match and not conditions_conflict(match):
                 before = {r["trace_id"] for r in match["supporting_refs"]}
                 added = [r for r in insight["supporting_refs"] if r["trace_id"] not in before]
                 match["supporting_refs"].extend(added)
@@ -344,9 +368,18 @@ class EvidenceVerifier:
                 insight["status"] = "pending_math_validation"
             else:
                 insight["status"] = "verified_observation"
+            independent = len({r["trace_id"] for r in insight["supporting_refs"]})
+            counterexamples = len({r["trace_id"] for r in insight["counterexample_refs"]})
+            insight["semantic_support"] = ("conflicted" if counterexamples or insight.get("risk_level") == "high" else
+                                           "repeated_observation" if independent > 1 else "single_observation")
+            insight["semantic_validation"] = "not_independently_checked"
+            insight["risk_level"] = ("high" if errors or counterexamples or insight.get("risk_level") == "high" else
+                                     "medium" if independent == 1 else "low")
             details.append({"insight_id": insight["insight_id"], "errors": errors,
                             "status": insight["status"],
-                            "independent_traces": len({r["trace_id"] for r in insight["supporting_refs"]})})
+                            "independent_traces": independent, "counterexample_traces": counterexamples,
+                            "risk_level": insight["risk_level"], "semantic_support": insight["semantic_support"],
+                            "semantic_validation": insight["semantic_validation"]})
         return {"verified": sum(d["status"] == "verified_observation" for d in details),
                 "pending": sum(d["status"] == "pending_math_validation" for d in details),
                 "rejected": sum(bool(d["errors"]) for d in details),

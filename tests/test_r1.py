@@ -68,7 +68,7 @@ class R1Tests(unittest.TestCase):
             self.assertEqual(model_claim["status"], "pending_math_validation")
 
     def test_skill_static_checks(self):
-        content = "---\nname: alfworld-r1\ndescription: Act on state feedback\n---\n# When to use\n# Procedure\n# Avoid\n# Validation\n"
+        content = "---\nname: alfworld-r1\ndescription: Act on state feedback\n---\n# When to use\n- An action returns no state change\n# Procedure\n# Avoid\n# Validation\n"
         self.assertEqual(validate_skill(content, "alfworld", [{"benchmark": "alfworld"}]), [])
         self.assertIn("prohibited_content", validate_skill(content + "Go to countertop 1\n", "alfworld", [{"benchmark": "alfworld"}]))
         self.assertIn("token_proxy_limit_exceeded", validate_skill(content + "word " * 1600, "alfworld", [{"benchmark": "alfworld"}]))
@@ -95,6 +95,8 @@ class R1Tests(unittest.TestCase):
             outcome = compare("livemath", base, cand, root / "out", conf, conf)
             self.assertEqual(outcome["decision"], "accept")
             self.assertEqual(outcome["transitions"]["fail_to_pass"], 1)
+            self.assertEqual(outcome["auxiliary_metrics"]["single_run_stability"], "unmeasured")
+            self.assertIn("delta_tool_calls", outcome["auxiliary_metrics"])
             self.assertTrue((root / "out/diff.csv").is_file())
             with self.assertRaises(ValueError):
                 compare("livemath", base, cand, root / "out", conf, {**conf, "model_id": "different"})

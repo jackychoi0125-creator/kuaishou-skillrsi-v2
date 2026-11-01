@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from skillrsi_m3.core import write_json
+from skillrsi_m1.core import events_from_trace
+from .triage import _skill_reads
 
 EXPECTED = {"spreadsheetbench": 40, "alfworld": 18, "livemath": 17}
 
@@ -25,7 +27,12 @@ def _read_run(job: Path) -> dict[str, dict[str, Any]]:
             score = (result.get("verifier_result") or {}).get("rewards", {}).get("reward")
             if score is None or abs(float(score) - float(row["reward"])) > 1e-6:
                 raise ValueError(f"summary disagrees with official score: {task_id}")
-            rows[task_id] = {**row, "official_reward": float(score), "result_path": str(trial)}
+            trajectory = trial.parent / "agent/trajectory.json"
+            events = events_from_trace(json.loads(trajectory.read_text())) if trajectory.exists() else []
+            rows[task_id] = {**row, "official_reward": float(score), "result_path": str(trial),
+                             "tool_calls": sum(event["kind"] == "tool_call" for event in events),
+                             "skill_reads": len(_skill_reads(events)),
+                             "trajectory_present": trajectory.exists()}
     return rows
 
 
@@ -67,6 +74,16 @@ def compare(benchmark: str, baseline_job: Path, candidate_job: Path, out_dir: Pa
         writer.writerows(diff)
     gain = transitions["fail_to_pass"] - transitions["pass_to_fail"]
     decision = "evaluation_invalid" if invalid else "accept" if gain > 0 and transitions["pass_to_fail"] == 0 else "reject"
+    before_totals, after_totals = _totals(before), _totals(after)
+    auxiliary = {"single_run_stability": "unmeasured", "paired_trace_coverage":
+                 sum(old["trajectory_present"] and after[task_id]["trajectory_present"]
+                     for task_id, old in before.items()) / EXPECTED[benchmark],
+                 "explicit_skill_read_tasks": sum(row["skill_reads"] > 0 for row in after.values()),
+                 "explicit_skill_read_rate": sum(row["skill_reads"] > 0 for row in after.values()) / EXPECTED[benchmark],
+                 "delta_input_tokens": after_totals["input_tokens"] - before_totals["input_tokens"],
+                 "delta_output_tokens": after_totals["output_tokens"] - before_totals["output_tokens"],
+                 "delta_duration_sec": after_totals["duration_sec"] - before_totals["duration_sec"],
+                 "delta_tool_calls": after_totals["tool_calls"] - before_totals["tool_calls"]}
     result = {"benchmark": benchmark, "tasks": EXPECTED[benchmark], "baseline_pass": sum(x["official_reward"] >= .999 for x in before.values()),
               "candidate_pass": sum(x["official_reward"] >= .999 for x in after.values()),
               "baseline_success_rate": sum(x["official_reward"] >= .999 for x in before.values()) / EXPECTED[benchmark],
@@ -82,7 +99,8 @@ def compare(benchmark: str, baseline_job: Path, candidate_job: Path, out_dir: Pa
               "candidate_execution_errors": sum(_truth(row["exception"]) for row in after.values()),
               "decision": decision, "confidence": "low" if gain == 1 else "unquantified",
               "baseline_job": str(baseline_job), "candidate_job": str(candidate_job),
-              "baseline_totals": _totals(before), "candidate_totals": _totals(after)}
+              "baseline_totals": before_totals, "candidate_totals": after_totals,
+              "auxiliary_metrics": auxiliary}
     write_json(out_dir / "acceptance.json", result)
     return result
 
@@ -90,4 +108,5 @@ def compare(benchmark: str, baseline_job: Path, candidate_job: Path, out_dir: Pa
 def _totals(rows: dict[str, dict[str, Any]]) -> dict[str, float]:
     return {name: sum(float(row.get(field) or 0) for row in rows.values())
             for name, field in (("input_tokens", "input_tokens"), ("cache_tokens", "cache_tokens"),
-                                ("output_tokens", "output_tokens"), ("duration_sec", "duration_sec"))}
+                                ("output_tokens", "output_tokens"), ("duration_sec", "duration_sec"),
+                                ("tool_calls", "tool_calls"))}

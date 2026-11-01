@@ -12,8 +12,9 @@ from skillrsi_m3.core import write_json
 
 MAX_CHARS = 8000
 MAX_TOKEN_PROXY = 1500
-PROHIBITED = (r"(?i)api[_ -]?key", r"(?i)secret", r"(?i)golden", r"(?i)/bench/answers/",
-              r"(?i)task[_ -]?id", r"(?i)ignore (all )?previous instructions",
+PROHIBITED = (r"(?i)(?:api[_ -]?key|secret|token)\s*[:=]\s*['\"]?[a-z0-9_-]{12,}",
+              r"(?i)(?:golden\s+(?:answer|file|result)|/bench/answers/)",
+              r"(?i)task[_ -]?id\s*[:=]\s*['\"]?[a-z0-9_-]{8,}", r"(?i)ignore (all )?previous instructions",
               r"(?i)\b(?:countertop|cabinet|drawer|desk|table|shelf|fridge|microwave)\s+\d+\b",
               r"(?i)\b(?:take|use|put|go to)\s+(?:candle|desklamp)\b",
               r"(?i)(?:all|complete set of) expected outputs")
@@ -44,6 +45,35 @@ def token_proxy(text: str) -> int:
     return len(re.findall(r"\w+|[^\w\s]", text))
 
 
+def rule_evidence_map(text: str, insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map each generated directive to supporting Train Insight IDs; weak links stay explicit."""
+    rules = []
+    section = ""
+    stop = {"the", "and", "for", "with", "when", "from", "that", "into", "then", "only", "must"}
+    for line in text.splitlines():
+        if line.startswith("#"):
+            section = line.lstrip("# ").strip().lower()
+        if section not in {"procedure", "avoid", "validation"} or not re.match(r"^\s*(?:-|\d+\.)\s+", line):
+            continue
+        wording = re.sub(r"^\s*(?:-|\d+\.)\s+", "", line).strip()
+        words = set(re.findall(r"[a-z]{3,}", wording.lower())) - stop
+        scored = []
+        for item in insights:
+            context = " ".join([item.get("principle", ""), item.get("recommended_behavior", ""),
+                                *item.get("trigger_conditions", []), *item.get("avoid_conditions", [])])
+            overlap = len(words & (set(re.findall(r"[a-z]{3,}", context.lower())) - stop))
+            if overlap >= 2:
+                scored.append((overlap, item["insight_id"]))
+        scored.sort(reverse=True)
+        if not scored and len(insights) == 1:
+            scored = [(0, insights[0]["insight_id"])]
+        rules.append({"rule_id": f"rule_{len(rules)+1:02d}", "section": section, "text": wording,
+                      "insight_ids": [item_id for _, item_id in scored[:3]],
+                      "mapping_status": "single_insight_context" if scored and scored[0][0] == 0 else
+                      "lexical_candidate" if scored else "unmapped"})
+    return rules
+
+
 def validate_skill(text: str, benchmark: str, insights: list[dict[str, Any]]) -> list[str]:
     errors = []
     front = re.match(r"\A---\n(.*?)\n---\n", text, re.S)
@@ -69,8 +99,13 @@ def validate_skill(text: str, benchmark: str, insights: list[dict[str, Any]]) ->
     if len(lines) != len(set(lines)):
         errors.append("duplicate_rule")
     sections = re.split(r"(?m)^#(?:#*)\s+", text)
+    applicability = next((part for part in sections if part.lower().startswith("when to use")), "")
     procedure = next((part for part in sections if part.lower().startswith("procedure")), "")
     avoid = next((part for part in sections if part.lower().startswith("avoid")), "")
+    if not re.search(r"(?m)^\s*(?:-|\d+\.)\s+\S+", applicability):
+        errors.append("missing_applicability_condition")
+    if re.search(r"(?i)\b(?:always|on every task|for every task|for all tasks)\b", procedure):
+        errors.append("unconditional_procedure")
     def directives(part: str) -> set[str]:
         return {re.sub(r"(?i)\b(?:do not|don't|never|avoid|must|always)\b", "", line).strip(" -.*`\t").lower()
                 for line in part.splitlines() if line.startswith(("- ", "1. ", "2. ", "3. ")) and len(line) > 12}
@@ -92,13 +127,13 @@ def run(benchmark: str, m3_dir: Path, skill_root: Path, out_dir: Path,
     path = m3_dir / "insights.jsonl"
     insights = [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.is_file() else []
     usable = [i for i in insights if i["status"] == "verified_observation" and i["trigger_conditions"]
+              and i.get("risk_level") != "high"
               and (benchmark != "livemath" or i.get("extraction_method") == "deterministic_observed_behavior")
               and not re.search(r"(?i)\b(?:countertop|cabinet|drawer|desk|table|shelf|fridge|microwave)\s+\d+\b",
                                 i["principle"] + " " + i["recommended_behavior"])
               and not (benchmark == "alfworld" and "desklamp" in
                        (i["principle"] + " " + i["recommended_behavior"]).lower())
-              and not (benchmark == "alfworld" and re.search(r"(?i)\b(?:countertops?|surfaces?|spatial relationship|highest.probability|search|location priority)\b",
-                       i["principle"] + " " + i["recommended_behavior"]))]
+              ]
     if not usable:
         manifest = {"benchmark": benchmark, "status": "no_candidate", "reason": "no_verified_insights"}
         write_json(out_dir / "candidate_manifest.json", manifest)
@@ -128,6 +163,9 @@ def run(benchmark: str, m3_dir: Path, skill_root: Path, out_dir: Path,
         raise ValueError("Kimi did not return skill_markdown")
     markdown, normalizations = normalize_skill(markdown, benchmark)
     errors = validate_skill(markdown, benchmark, usable)
+    rules = rule_evidence_map(markdown, usable)
+    if any(rule["mapping_status"] == "unmapped" for rule in rules):
+        errors.append("unmapped_rule")
     if errors:
         manifest = {"benchmark": benchmark, "status": "no_candidate", "reason": "static_audit_failed",
                     "errors": errors, "origin_llm_call_id": call_id}
@@ -145,7 +183,7 @@ def run(benchmark: str, m3_dir: Path, skill_root: Path, out_dir: Path,
                 "snapshot_path": str(snapshot), "sha256": sha, "bytes": skill_path.stat().st_size,
                 "skill_token_proxy": token_proxy(markdown), "token_proxy_limit": MAX_TOKEN_PROXY,
                 "insight_ids": [i["insight_id"] for i in usable[:12]], "origin_llm_call_id": call_id,
-                "static_audit": "passed", "normalizations": normalizations}
+                "rule_evidence_map": rules, "static_audit": "passed", "normalizations": normalizations}
     write_json(out_dir / "candidate_manifest.json", manifest)
     write_json(out_dir / "usage.json", client.usage())
     return manifest

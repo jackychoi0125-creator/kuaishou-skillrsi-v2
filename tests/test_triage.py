@@ -30,6 +30,13 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(difference["r1"][0]["label"], "skill_read")
         self.assertEqual(difference["r1"][0]["event_id"], "s2.call1")
 
+    def test_script_change_is_first_aligned_behavior_difference(self):
+        a = [{"label": "script_write", "detail": "sha_a", "event_id": "s3.call1", "step": 3}]
+        b = [{"label": "script_write", "detail": "sha_b", "event_id": "s8.call1", "step": 8}]
+        result = first_divergence(a, b)
+        self.assertEqual(result["change"], "different_action_or_result")
+        self.assertEqual(result["baseline"][0]["event_id"], "s3.call1")
+
     def test_alf_actions_and_no_progress_are_observed(self):
         events = [
             {"id": "s1.call1", "kind": "tool_call", "step": 1,

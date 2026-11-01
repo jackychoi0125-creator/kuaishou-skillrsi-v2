@@ -113,7 +113,7 @@ def first_divergence(left: list[dict[str, Any]], right: list[dict[str, Any]]) ->
                     "r1_prior": right[j1 - 1] if j1 else None}
         for offset in range(i2 - i1):
             a, b = left[i1 + offset], right[j1 + offset]
-            if a["detail"] != b["detail"] and a["label"] not in {"reasoning", "script_write"}:
+            if a["detail"] != b["detail"] and a["label"] != "reasoning":
                 return {"alignment": "task_milestone", "change": "different_action_or_result",
                         "baseline": [a], "r1": [b]}
     return {"alignment": "task_milestone", "change": "no_detected_milestone_difference",

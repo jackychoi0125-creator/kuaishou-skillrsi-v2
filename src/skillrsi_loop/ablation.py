@@ -266,6 +266,11 @@ def run_one(root: Path, benchmark: str, *, n: int = 3, seed: int = 0,
     if label != "default":
         out = out / label
     out.mkdir(parents=True, exist_ok=True)
+    if selected_ids is not None:
+        write_json(out / "selection.json", {"benchmark": benchmark, "split": "train",
+                                            "task_ids": selected_ids,
+                                            "source": "explicit Train ID file validated against Train metrics",
+                                            "id_file_sha256": hashlib.sha256(id_file.read_bytes()).hexdigest()})
     arms = prepare_arms(root, benchmark, out)
     state_path = out / "stage_manifest.json"
     selection_sha = hashlib.sha256(json.dumps(selected_ids, sort_keys=True).encode()).hexdigest() if selected_ids else None
@@ -295,15 +300,17 @@ def run_one(root: Path, benchmark: str, *, n: int = 3, seed: int = 0,
     return {**state, "summary": result}
 
 
-def render_report(root: Path, benchmarks: tuple[str, ...]) -> Path:
+def render_report(root: Path, benchmarks: tuple[str, ...], label: str = "default") -> Path:
     """Summarize completed official Train runs without reading Val task feedback."""
-    lines = ["# R1 Train A/B/C/D Diagnostic Replay", "",
+    lines = ["# R1 Train A/B/C/D Diagnostic Replay" + (" — " + label if label != "default" else ""), "",
              "Official Harbor scores on a small, identical Train subset for each arm.",
              "One execution per arm cannot establish Skill causality or statistical significance.", "",
              "| Benchmark | Arm | Pass/n | Fix/Regression vs A | Explicit reads | Tool calls | Input/Output tokens | Duration s |",
              "|---|---|---:|---:|---:|---:|---:|---:|"]
     for benchmark in benchmarks:
         summary_path = root / "results/train_ablation" / benchmark / "summary.json"
+        if label != "default":
+            summary_path = root / "results/train_ablation" / benchmark / label / "summary.json"
         if not summary_path.is_file():
             continue
         summary = json.loads(summary_path.read_text())
@@ -316,7 +323,8 @@ def render_report(root: Path, benchmarks: tuple[str, ...]) -> Path:
                          f"{data['duration_sec_sum']:.1f} |")
     lines += ["", "D1/D2 are Train Insight linked rule fragments; the mapping is recorded in each arms_manifest.json.",
               "The Val regression audit does not enter this replay or the M3/M4 learning path.", ""]
-    path = root / "results/train_ablation/TRAIN_ABLATION_REPORT.md"
+    filename = "TRAIN_ABLATION_REPORT.md" if label == "default" else f"TRAIN_ABLATION_{label.upper()}_REPORT.md"
+    path = root / "results/train_ablation" / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
@@ -340,8 +348,8 @@ def main(argv: list[str] | None = None) -> None:
                          label=args.label, id_file=args.id_file.resolve() if args.id_file else None)
         print(json.dumps({"benchmark": benchmark, "completed_arms": list(result.get("jobs", {})),
                           "mode": result.get("mode", "real")}, ensure_ascii=False), flush=True)
-    if not args.dry_run and args.label == "default":
-        render_report(args.root.resolve(), tuple(BENCHMARKS if args.benchmark == "all" else (args.benchmark,)))
+    if not args.dry_run:
+        render_report(args.root.resolve(), tuple(BENCHMARKS if args.benchmark == "all" else (args.benchmark,)), args.label)
 
 
 if __name__ == "__main__":

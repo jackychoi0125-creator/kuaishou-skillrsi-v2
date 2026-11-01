@@ -183,6 +183,8 @@ def _trial_rows(job: Path, benchmark: str) -> tuple[list[dict[str, Any]], list[d
         if not trace_path.is_file():
             raise ValueError(f"missing ATIF trace: {task_id}")
         events = events_from_trace(json.loads(trace_path.read_text()))
+        verifier_path = trial / "verifier/metrics.json"
+        verifier_metrics = json.loads(verifier_path.read_text()) if verifier_path.is_file() else {}
         model_error = value.get("model_error", "").lower() == "true"
         exception = value.get("exception", "").lower() == "true"
         note = value.get("note") or ""
@@ -201,6 +203,7 @@ def _trial_rows(job: Path, benchmark: str) -> tuple[list[dict[str, Any]], list[d
                "skill_discovery_event_ids": _skill_discoveries(events),
                "skill_read_event_ids": _skill_reads(events), "trial_path": str(trial),
                "trace_sha256": file_sha(trace_path), "official_result_path": str(matches[0])}
+        row["grader_revision"] = verifier_metrics.get("grading_revision")
         if benchmark == "alfworld":
             row["alfworld"] = alfworld_counts(trial, events)
         rows.append(row)

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillrsi_m3.core import write_json
-from .stability import digest
+from .stability import digest, file_sha, train_metrics
 
 POLICY = {
     "schema_version": 1,
@@ -40,6 +40,9 @@ def freeze_policy(root: Path) -> dict[str, Any]:
 def crossfit_audit(root: Path, benchmark: str, holdout_ids: list[str],
                    insight_ids: list[str]) -> dict[str, Any]:
     """Fail closed when any proposed holdout entered R1 M2/M3 or cache scope is unknown."""
+    bundle = root / "results/stability/crossfit" / benchmark / "provenance.json"
+    if bundle.is_file():
+        return _verify_crossfit_bundle(root, benchmark, holdout_ids, insight_ids, bundle)
     m2 = root / "results/m2"
     profiles_path = m2 / "trace_profiles.jsonl"
     if not profiles_path.is_file():
@@ -76,6 +79,52 @@ def crossfit_audit(root: Path, benchmark: str, holdout_ids: list[str],
             "cache_isolation_verified": False,
             "reason": "R1 M2 was built from full Train and cache was not split by holdout"
                       if status != "clean" else "isolated"}
+
+
+def _verify_crossfit_bundle(root: Path, benchmark: str, holdout_ids: list[str],
+                            insight_ids: list[str], manifest_path: Path) -> dict[str, Any]:
+    """Validate a separately generated Train-only M2/M3 bundle before internal use."""
+    try:
+        meta = json.loads(manifest_path.read_text())
+        source = set(meta["source_train_task_ids"])
+        holdout = set(meta["holdout_task_ids"])
+        if holdout != set(holdout_ids) or source & holdout or not source:
+            raise ValueError("holdout/source task sets overlap or differ")
+        if not (source | holdout).issubset(train_metrics(root, benchmark)):
+            raise ValueError("crossfit contains non-Train task")
+        base = manifest_path.parent.resolve()
+        profiles_path = Path(meta["m2_profiles_path"]).resolve()
+        insights_path = Path(meta["m3_insights_path"]).resolve()
+        cache_root = Path(meta["cache_root"]).resolve()
+        for path in (profiles_path, insights_path, cache_root):
+            if not path.is_relative_to(base):
+                raise ValueError("crossfit artifact escaped isolated bundle")
+        if cache_root == (root / "results/r1/cache").resolve() or not meta.get("cache_initially_empty"):
+            raise ValueError("cache isolation not established")
+        if file_sha(profiles_path) != meta["m2_profiles_sha256"] or file_sha(insights_path) != meta["m3_insights_sha256"]:
+            raise ValueError("crossfit artifact SHA mismatch")
+        profiles = [json.loads(line) for line in profiles_path.read_text().splitlines() if line.strip()]
+        if any(p.get("benchmark") != benchmark or p.get("split") != "train" or
+               p.get("task_id") not in source for p in profiles):
+            raise ValueError("crossfit M2 profile leaked holdout or non-Train")
+        profile_ids = {p["trace_id"] for p in profiles}
+        insights = {x["insight_id"]: x for x in (json.loads(line) for line in insights_path.read_text().splitlines() if line.strip())}
+        if not insight_ids or any(item_id not in insights for item_id in insight_ids):
+            raise ValueError("selected insight absent from crossfit M3")
+        for item_id in insight_ids:
+            item = insights[item_id]
+            if item.get("status") != "verified_observation" or not item.get("supporting_refs"):
+                raise ValueError("crossfit insight lacks verified Train support")
+            if any(ref["trace_id"] not in profile_ids for ref in item["supporting_refs"] + item.get("counterexample_refs", [])):
+                raise ValueError("crossfit insight references holdout/unknown trace")
+        return {"status": "clean", "holdout_task_ids_sha256": digest(sorted(holdout)),
+                "source_task_ids_sha256": digest(sorted(source)),
+                "m2_profiles_sha256": meta["m2_profiles_sha256"],
+                "m3_insights_sha256": meta["m3_insights_sha256"],
+                "cache_isolation_verified": True, "provenance_path": str(manifest_path)}
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        return {"status": "unverifiable", "reason": type(exc).__name__ + ": " + str(exc),
+                "provenance_path": str(manifest_path)}
 
 
 def _paired_records(path: Path) -> list[dict[str, Any]]:

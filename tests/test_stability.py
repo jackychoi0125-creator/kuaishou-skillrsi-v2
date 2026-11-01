@@ -90,6 +90,12 @@ class StabilityTests(unittest.TestCase):
             rows, errors = _trial_rows(job, "livemath")
             self.assertEqual(rows[0]["reward"], 0)
             self.assertEqual(errors, [])
+            (job / "summary.csv").write_text(
+                "qid,reward,input_tokens,output_tokens,duration_sec,model_error,exception,note\n"
+                "t,0.0,10,2,1,True,False,429 rate limit\n")
+            _, errors = _trial_rows(job, "livemath")
+            self.assertEqual(errors[0]["classification"], "infrastructure")
+            self.assertEqual(errors[0]["task_id"], "t")
             (trial / "result.json").write_text(json.dumps({"verifier_result": {"rewards": {"reward": 1.0}}}))
             with self.assertRaisesRegex(ValueError, "reward mismatch"):
                 _trial_rows(job, "livemath")
@@ -201,6 +207,35 @@ class StabilityTests(unittest.TestCase):
                 "high_cost_input_ratio": 2.0, "policy_sha256": "policy"})
             self.assertEqual(result["status"], "needs_more_evidence")
             self.assertFalse((root / "results/r2/livemath/val").exists())
+
+    def test_clean_crossfit_bundle_requires_isolated_train_sources(self):
+        with tempfile.TemporaryDirectory() as temp:
+            parent = Path(temp)
+            root = parent / "repo"
+            base = root / "results/stability/crossfit/livemath"
+            base.mkdir(parents=True)
+            (parent / "metrics").mkdir()
+            (parent / "metrics/livemath-baseline.csv").write_text(
+                "task_id,split\nsource,train\nholdout,train\nval,val\n")
+            profiles = base / "trace_profiles.jsonl"
+            profiles.write_text(json.dumps({"trace_id": "source-trace", "benchmark": "livemath", "task_id": "source",
+                                            "split": "train"}) + "\n")
+            insights = base / "insights.jsonl"
+            insights.write_text(json.dumps({"insight_id": "i", "status": "verified_observation",
+                                            "supporting_refs": [{"trace_id": "source-trace"}],
+                                            "counterexample_refs": []}) + "\n")
+            cache = base / "fresh_cache"
+            cache.mkdir()
+            from skillrsi_loop.stability import file_sha
+            meta = {"source_train_task_ids": ["source"], "holdout_task_ids": ["holdout"],
+                    "m2_profiles_path": str(profiles), "m3_insights_path": str(insights),
+                    "m2_profiles_sha256": file_sha(profiles), "m3_insights_sha256": file_sha(insights),
+                    "cache_root": str(cache), "cache_initially_empty": True}
+            (base / "provenance.json").write_text(json.dumps(meta))
+            self.assertEqual(crossfit_audit(root, "livemath", ["holdout"], ["i"])["status"], "clean")
+            profiles.write_text(profiles.read_text() + json.dumps({"trace_id": "leak", "benchmark": "livemath", "task_id": "holdout",
+                                                               "split": "train"}) + "\n")
+            self.assertEqual(crossfit_audit(root, "livemath", ["holdout"], ["i"])["status"], "unverifiable")
 
 
 if __name__ == "__main__":

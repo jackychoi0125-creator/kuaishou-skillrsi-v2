@@ -26,11 +26,17 @@ def analyze(root: Path, benchmark: str) -> dict[str, Any]:
     run_manifest = json.loads(run_manifest_path.read_text()) if run_manifest_path.is_file() else {"runs": {}}
     action_totals = {arm: {"pi_tool_calls": 0, "submitted_commands": 0,
                            "official_executed_steps": 0, "observed_no_progress_events": 0} for arm in arms}
+    run_errors = {arm: {"model_errors": 0, "execution_errors": 0,
+                        "controller_seconds": 0.0} for arm in arms}
     for repeat in summary["complete_repeats"]:
         for arm in arms:
             record = run_manifest["runs"][f"repeat{repeat}-{arm}"]
-            for trial in record["attempts"][0]["rows"]:
+            attempt = record["attempts"][0]
+            run_errors[arm]["controller_seconds"] += float(attempt.get("elapsed_sec") or 0)
+            for trial in attempt["rows"]:
                 actions = trial.get("alfworld") or {}
+                run_errors[arm]["model_errors"] += bool(trial.get("model_error"))
+                run_errors[arm]["execution_errors"] += bool(trial.get("execution_error"))
                 action_totals[arm]["pi_tool_calls"] += int(trial.get("pi_tool_calls") or 0)
                 action_totals[arm]["submitted_commands"] += int(actions.get("submitted_commands") or 0)
                 action_totals[arm]["official_executed_steps"] += int(actions.get("official_executed_steps") or 0)
@@ -100,7 +106,7 @@ def analyze(root: Path, benchmark: str) -> dict[str, Any]:
         reasons.append("duration_cost_limit")
     result = {"benchmark": benchmark, "source": "official Harbor Train holdout, paired by task_id and repeat",
               "complete_repeats": summary["complete_repeats"], "effective_distinct_tasks": signal["effective_task_count"],
-              "counts": counts, "action_totals": action_totals,
+              "counts": counts, "action_totals": action_totals, "run_errors": run_errors,
               "descriptive_observed_signal": descriptive,
               "promotion_signal": signal, "metadata_matched_signal_D_minus_C": matched_signal,
               "input_ratio_D_over_B": input_ratio,

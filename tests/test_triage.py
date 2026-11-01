@@ -7,7 +7,7 @@ from skillrsi_m3.core import EvidenceVerifier, InsightConsolidator
 from skillrsi_m4.core import rule_evidence_map, validate_skill
 from skillrsi_loop.ablation import _healthy, prepare_arms
 from skillrsi_loop.triage import (_alf_summary, _script_diff, _skill_reads,
-                                  first_divergence, milestones)
+                                  first_behavior_divergence, first_divergence, milestones)
 
 
 class TriageTests(unittest.TestCase):
@@ -36,6 +36,14 @@ class TriageTests(unittest.TestCase):
         result = first_divergence(a, b)
         self.assertEqual(result["change"], "different_action_or_result")
         self.assertEqual(result["baseline"][0]["event_id"], "s3.call1")
+
+    def test_skill_read_does_not_hide_first_task_behavior_difference(self):
+        before = [{"label": "final_option", "detail": "A", "event_id": "s3.message", "step": 3}]
+        after = [{"label": "skill_read", "detail": "SKILL.md", "event_id": "s1.call1", "step": 1},
+                 {"label": "final_option", "detail": "B", "event_id": "s4.message", "step": 4}]
+        result = first_behavior_divergence(before, after)
+        self.assertEqual(result["change"], "different_action_or_result")
+        self.assertEqual(result["r1"][0]["event_id"], "s4.message")
 
     def test_alf_actions_and_no_progress_are_observed(self):
         events = [

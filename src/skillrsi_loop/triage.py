@@ -120,6 +120,12 @@ def first_divergence(left: list[dict[str, Any]], right: list[dict[str, Any]]) ->
             "baseline": [], "r1": []}
 
 
+def first_behavior_divergence(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> dict[str, Any]:
+    """Skill discovery/read is recorded separately from task behavior."""
+    return first_divergence([m for m in left if m["label"] != "skill_read"],
+                            [m for m in right if m["label"] != "skill_read"])
+
+
 def _option(text: str) -> str | None:
     matches = re.findall(r"\\boxed\s*\{\s*([A-E])\s*\}", text, re.I)
     return matches[-1].upper() if matches else None
@@ -326,7 +332,8 @@ def audit_case(benchmark: str, diff: dict[str, str], jobs: dict[str, Path],
               "skill_presence": {"metadata_available": True, "explicit_discovery_event_ids": discovery_ids,
                                  "explicit_read_event_ids": read_ids,
                                  "status": "explicit_read" if read_ids else "metadata_only"},
-              "first_key_behavior_difference": first_divergence(milestones_by_stage["baseline"], milestones_by_stage["r1"]),
+              "first_key_behavior_difference": first_behavior_divergence(
+                  milestones_by_stage["baseline"], milestones_by_stage["r1"]),
               "candidate_skill_rule": rule, "diagnosis_type": diagnosis,
               "diagnosis_evidence": {"baseline_event_ids": [x["event_id"] for x in milestones_by_stage["baseline"][:3]],
                                      "r1_event_ids": [x["event_id"] for x in milestones_by_stage["r1"][:3]],

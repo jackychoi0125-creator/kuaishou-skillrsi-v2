@@ -367,7 +367,8 @@ def run(result_root: Path, metrics_dir: Path) -> list[dict[str, Any]]:
     with (result_root / "REGRESSION_AUDIT.csv").open("w", newline="", encoding="utf-8") as target:
         fields = ["benchmark", "task_id", "task_type", "task_complexity", "transition",
                   "baseline_reward", "r1_reward", "delta_input_tokens", "delta_output_tokens",
-                  "delta_tool_calls", "delta_duration_sec", "skill_read", "diagnosis_type", "attribution_confidence"]
+                  "delta_tool_calls", "delta_duration_sec", "skill_discovery_event_ids",
+                  "skill_read_event_ids", "skill_read", "diagnosis_type", "attribution_confidence"]
         writer = csv.DictWriter(target, fieldnames=fields)
         writer.writeheader()
         for item in records:
@@ -380,12 +381,24 @@ def run(result_root: Path, metrics_dir: Path) -> list[dict[str, Any]]:
                              "delta_output_tokens": item["delta"]["output_tokens"],
                              "delta_tool_calls": item["delta"]["tool_calls"],
                              "delta_duration_sec": item["delta"]["duration_sec"],
+                             "skill_discovery_event_ids": json.dumps(item["skill_presence"]["explicit_discovery_event_ids"]),
+                             "skill_read_event_ids": json.dumps(item["skill_presence"]["explicit_read_event_ids"]),
                              "skill_read": bool(item["skill_presence"]["explicit_read_event_ids"]),
                              "diagnosis_type": item["diagnosis_type"],
                              "attribution_confidence": item["attribution_confidence"]})
     write_json(result_root / "REGRESSION_AUDIT_SUMMARY.json", {
         "changed_tasks": len(records), "transitions": dict(Counter(r["transition"] for r in records)),
         "by_benchmark": dict(Counter(r["benchmark"] for r in records)),
+        "benchmark_details": {benchmark: {
+            "regressions": sum(r["benchmark"] == benchmark and r["transition"] == "pass_to_fail" for r in records),
+            "fixes": sum(r["benchmark"] == benchmark and r["transition"] == "fail_to_pass" for r in records),
+            "explicit_skill_reads": sum(r["benchmark"] == benchmark and bool(r["skill_presence"]["explicit_read_event_ids"])
+                                        for r in records),
+            "delta_input_tokens": sum(r["delta"]["input_tokens"] for r in records if r["benchmark"] == benchmark),
+            "delta_output_tokens": sum(r["delta"]["output_tokens"] for r in records if r["benchmark"] == benchmark),
+            "delta_tool_calls": sum(r["delta"]["tool_calls"] for r in records if r["benchmark"] == benchmark),
+            "delta_duration_sec": sum(r["delta"]["duration_sec"] for r in records if r["benchmark"] == benchmark),
+        } for benchmark in BENCHMARKS},
         "diagnoses": dict(Counter(r["diagnosis_type"] for r in records)),
         "skill_explicit_reads": sum(bool(r["skill_presence"]["explicit_read_event_ids"]) for r in records),
         "val_data_policy": "read-only regression diagnosis; excluded from M3/M4 and Train ablation selection"})
@@ -414,7 +427,8 @@ def render_markdown(records: list[dict[str, Any]]) -> str:
                   f"输出 Token {item['output_tokens']['baseline']} → {item['output_tokens']['r1']}；"
                   f"工具调用 {item['tool_calls']['baseline']} → {item['tool_calls']['r1']}；"
                   f"耗时 {item['duration_sec']['baseline']:g}s → {item['duration_sec']['r1']:g}s。",
-                  f"- Skill：{item['skill_presence']['status']}，读取事件 {item['skill_presence']['explicit_read_event_ids']}；"
+                  f"- Skill：{item['skill_presence']['status']}，发现事件 {item['skill_presence']['explicit_discovery_event_ids']}，"
+                  f"读取事件 {item['skill_presence']['explicit_read_event_ids']}；"
                   f"关联规则 {item['candidate_skill_rule'].get('rule_id') or '未确定'}（{item['candidate_skill_rule']['match_status']}）。",
                   f"- 首次里程碑差异：{item['first_key_behavior_difference']['change']}；"
                   f"Baseline {[(x['label'], x['event_id']) for x in item['first_key_behavior_difference']['baseline']]}；"

@@ -13,7 +13,7 @@ from skillrsi_m3.core import write_json
 MAX_CHARS = 8000
 MAX_TOKEN_PROXY = 1500
 PROHIBITED = (r"(?i)(?:api[_ -]?key|secret|token)\s*[:=]\s*['\"]?[a-z0-9_-]{12,}",
-              r"(?i)(?:golden\s+(?:answer|file|result)|/bench/answers/)",
+              r"(?i)/bench/answers/",
               r"(?i)task[_ -]?id\s*[:=]\s*['\"]?[a-z0-9_-]{8,}", r"(?i)ignore (all )?previous instructions",
               r"(?i)\b(?:countertop|cabinet|drawer|desk|table|shelf|fridge|microwave)\s+\d+\b",
               r"(?i)\b(?:take|use|put|go to)\s+(?:candle|desklamp)\b",
@@ -56,12 +56,17 @@ def rule_evidence_map(text: str, insights: list[dict[str, Any]]) -> list[dict[st
         if section not in {"procedure", "avoid", "validation"} or not re.match(r"^\s*(?:-|\d+\.)\s+", line):
             continue
         wording = re.sub(r"^\s*(?:-|\d+\.)\s+", "", line).strip()
-        words = set(re.findall(r"[a-z]{3,}", wording.lower())) - stop
+        if re.fullmatch(r"\*\*[^*]+\*\*", wording):
+            continue
+        aliases = {"compare": "check", "preconditions": "required", "precondition": "required",
+                   "notation": "definition", "custom": "local", "steps": "reasoning"}
+        words = {aliases.get(word, word) for word in re.findall(r"[a-z]{3,}", wording.lower())} - stop
         scored = []
         for item in insights:
             context = " ".join([item.get("principle", ""), item.get("recommended_behavior", ""),
                                 *item.get("trigger_conditions", []), *item.get("avoid_conditions", [])])
-            overlap = len(words & (set(re.findall(r"[a-z]{3,}", context.lower())) - stop))
+            context_words = {aliases.get(word, word) for word in re.findall(r"[a-z]{3,}", context.lower())} - stop
+            overlap = len(words & context_words)
             if overlap >= 2:
                 scored.append((overlap, item["insight_id"]))
         scored.sort(reverse=True)
@@ -93,6 +98,11 @@ def validate_skill(text: str, benchmark: str, insights: list[dict[str, Any]]) ->
             errors.append(f"missing_{heading.lower().replace(' ', '_')}")
     for pattern in PROHIBITED:
         if re.search(pattern, text):
+            errors.append("prohibited_content")
+            break
+    for line in text.splitlines():
+        if re.search(r"(?i)\b(?:use|read|open|copy|load)\b.*\bgolden\b", line) and not re.search(
+                r"(?i)\b(?:do not|don't|never|avoid|without)\b", line):
             errors.append("prohibited_content")
             break
     lines = [re.sub(r"\W+", " ", line.lower()).strip() for line in text.splitlines() if line.startswith(("- ", "1. ", "2. ", "3. "))]

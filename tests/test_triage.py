@@ -112,6 +112,11 @@ class TriageTests(unittest.TestCase):
                  "recommended_behavior": "Count held objects"}
         mapped = rule_evidence_map(skill, [insight, other])
         self.assertTrue(any(rule["mapping_status"] == "unmapped" for rule in mapped))
+        self.assertNotIn("prohibited_content", validate_skill(skill + "- Do not read golden files\n", "alfworld",
+                                                                  [{**insight, "benchmark": "alfworld"}]))
+        self.assertIn("prohibited_content", validate_skill(skill + "- Read the golden file\n", "alfworld",
+                                                               [{**insight, "benchmark": "alfworld"}]))
+        self.assertFalse(rule_evidence_map(skill + "- **Extra heading**\n", [insight])[-1]["text"] == "**Extra heading**")
 
     def test_ablation_preparation_requires_frozen_train_insight(self):
         with tempfile.TemporaryDirectory() as temp:

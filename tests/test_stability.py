@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from skillrsi_loop.rule_selection import crossfit_audit, freeze_policy, select_one
+from skillrsi_loop.interaction import run as run_interaction
 from skillrsi_loop.stability import (_attempt_status, _budget_allows, _cluster_interval,
                                       _manifest, _recover_pending, _trial_rows, alfworld_counts,
                                       digest, run_benchmark, run_fingerprint, summarize_benchmark)
@@ -66,6 +67,25 @@ class StabilityTests(unittest.TestCase):
             second = run_fingerprint(Path("/tmp/repo"), study, "A", 1, None, plan)
         self.assertEqual(first["task_ids_sha256"], second["task_ids_sha256"])
         self.assertEqual((first["sample_seed"], second["sample_seed"]), (0, 1))
+
+    def test_livemath_id_file_is_fingerprinted_and_checked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            ids_file = Path(temp) / "ids.json"
+            ids_file.write_text(json.dumps(["t1", "t2"]))
+            study = {"benchmark": "livemath", "task_ids": ["t1", "t2"],
+                     "task_ids_sha256": digest(["t1", "t2"]), "sample_seed": 0,
+                     "id_file": str(ids_file)}
+            plan = {"plan_sha256": "plan", "budget": {"max_infra_retries_per_run": 1,
+                    "timeout_seconds": {"livemath": 900}}}
+            fake_model = {"model_id": "model", "api": "openai", "base_url": "endpoint"}
+            with patch("skillrsi_loop.stability.config", return_value=fake_model), \
+                 patch("skillrsi_loop.stability.file_sha", return_value="hash"), \
+                 patch("skillrsi_loop.stability._scorer_sha", return_value="scorer"):
+                first = run_fingerprint(Path(temp), study, "A", 0, None, plan)
+                self.assertIn("task_id_file_sha256", first)
+                ids_file.write_text(json.dumps(["t2", "t1"]))
+                with self.assertRaisesRegex(ValueError, "fixed Train ID file"):
+                    run_fingerprint(Path(temp), study, "A", 0, None, plan)
 
     def test_failure_reward_is_valid_and_infrastructure_error_only_retries(self):
         self.assertEqual(_attempt_status({"timed_out": False, "exit_code": 0,
@@ -185,6 +205,27 @@ class StabilityTests(unittest.TestCase):
                  "wall_seconds": 0, "per_benchmark": {}}
         self.assertEqual(_budget_allows(plan, usage, "alfworld", 3, 0), (False, "max_harbor_task_executions"))
 
+    def test_controller_budget_stop_creates_incomplete_report_without_scores(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            out = root / "results/stability/livemath"
+            out.mkdir(parents=True)
+            (out / "arms_manifest.json").write_text(json.dumps({"arms": {
+                "A": {"skill_path": None, "skill_sha256": None},
+                "B": {"skill_path": None, "skill_sha256": "b"},
+                "D1": {"skill_path": None, "skill_sha256": "d"}}}))
+            plan = {"plan_sha256": "p", "budget": {
+                "max_harbor_task_executions": 0, "per_benchmark_task_executions": 0,
+                "max_input_tokens": 100, "per_benchmark_input_tokens": 100,
+                "max_output_tokens": 100, "max_wall_seconds": 100,
+                "per_arm_task_executions": 0}, "studies": {"livemath": {
+                "benchmark": "livemath", "task_ids": ["t"], "task_ids_sha256": "h",
+                "historical_strata": {"t": {"input_tokens": 1, "historical_reward": 0}},
+                "id_file": None, "sample_seed": 0}}}
+            result = run_benchmark(root, "livemath", plan, dry_run=False)
+            self.assertEqual(result["stopped_reason"], "max_harbor_task_executions")
+            self.assertEqual(json.loads((out / "stability_summary.json").read_text())["status"], "incomplete")
+
     def test_crossfit_and_no_candidate_skip_val(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -236,6 +277,29 @@ class StabilityTests(unittest.TestCase):
             profiles.write_text(profiles.read_text() + json.dumps({"trace_id": "leak", "benchmark": "livemath", "task_id": "holdout",
                                                                "split": "train"}) + "\n")
             self.assertEqual(crossfit_audit(root, "livemath", ["holdout"], ["i"])["status"], "unverifiable")
+
+    def test_interaction_dry_run_freezes_train_comparison_without_scores(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            out = root / "results/stability/spreadsheetbench"
+            out.mkdir(parents=True)
+            study = {"benchmark": "spreadsheetbench", "task_ids": ["a", "b", "c", "d"],
+                     "task_ids_sha256": digest(["a", "b", "c", "d"])}
+            (root / "results/stability/EXPERIMENT_PLAN.json").write_text(json.dumps({
+                "plan_sha256": "p", "studies": {"spreadsheetbench": study}}))
+            prior = root / "results/train_ablation/spreadsheetbench"
+            prior.mkdir(parents=True)
+            (prior / "summary.json").write_text(json.dumps({"task_ids": ["a", "b", "c"]}))
+            from skillrsi_loop.stability import file_sha
+            skill = out / "SKILL.md"
+            skill.write_text("valid")
+            (out / "arms_manifest.json").write_text(json.dumps({"arms": {
+                "C": {"skill_path": str(skill), "skill_sha256": file_sha(skill)},
+                "D2": {"skill_path": str(skill), "skill_sha256": file_sha(skill)}}}))
+            result = run_interaction(root, dry_run=True)
+            self.assertEqual(result["model_calls"], 0)
+            self.assertIsNone(result["official_scores"])
+            self.assertFalse((out / "interaction_runs_manifest.json").exists())
 
 
 if __name__ == "__main__":

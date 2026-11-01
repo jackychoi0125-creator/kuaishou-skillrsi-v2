@@ -18,6 +18,8 @@ The frozen pilot budget caps task executions, model input and output tokens, wal
 
 For ALFWorld, `submitted_commands` comes from the official action transcript, and `official_executed_steps/max_steps` comes from verifier metrics. Pi tool calls, bridge send/start/status calls, repeated commands, and observed no-progress/invalid-action feedback are separate. The verifier's executed-step count is not interpreted as the count of admissible actions; that count is unknown unless separately validated.
 
+SpreadsheetBench has a separate, prespecified Train interaction study. `skillrsi-interaction --mode dry-run` freezes the same four-task set and the C/D2 run order without model calls. The real mode adds two independent C and D2 runs per task, then compares them against the existing paired A/B/D1 pilot and records script differences. Its budget is separate and also checks the global pilot cap. This tests the prior Train-only hypothesis that combining R1 rules may hurt compared with short fragments; it does not use Val regressions to choose tasks or rewrite rules.
+
 ## Promotion and data boundary
 
 `skillrsi-select-rules` reads only Train stability outputs and frozen R1 Train Insights. Its policy is frozen before pilot results in `RULE_SELECTION_POLICY.json`. A rule needs repeated improvement over B on at least two distinct tasks, acceptable Token/time cost, no observed paired regression, a clear Train Insight trigger, and clean Train internal validation. A/B presence effects and A/A natural variation remain separate from the D1/B comparison.

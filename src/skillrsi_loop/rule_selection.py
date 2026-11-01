@@ -226,18 +226,52 @@ def select_one(root: Path, benchmark: str, policy: dict[str, Any]) -> dict[str, 
 
 def run(root: Path) -> list[dict[str, Any]]:
     policy = freeze_policy(root)
+    experiment_plan = json.loads((root / "results/stability/EXPERIMENT_PLAN.json").read_text())
     results = [select_one(root, benchmark, policy) for benchmark in
                ("spreadsheetbench", "alfworld", "livemath")]
     lines = ["# R1 Train rule selection", "",
-             "Prespecified policy and official Train pilot. Repeated runs of one task are not independent tasks.", "",
+             "Official Harbor Train pilot; predeclared plan SHA: `" + experiment_plan["plan_sha256"] + "`; "
+             "rule policy SHA: `" + policy["policy_sha256"] + "`.",
+             "Four distinct Train tasks per Benchmark, two runs per arm. Repeated runs of one task are not independent tasks.", "",
              "| Benchmark | Status | B−A | D1−B | D1/B input ratio | Distinct stable improvements | Regressed tasks |",
              "|---|---|---:|---:|---:|---:|---:|"]
     for item in results:
         lines.append(f"| {item['benchmark']} | {item['status']} | {item.get('presence_effect_B_minus_A')} | "
                      f"{item.get('rule_effect_D1_minus_B')} | {item.get('input_ratio_D1_over_B')} | "
                      f"{len(item.get('stable_improved_task_ids', []))} | {len(item.get('regressed_task_ids', []))} |")
-    lines += ["", "R1 insights used all original Train. Cross-fitting requires rebuilding M2/M3 without held-out tasks and isolating caches.",
-              "Pilot data are in-sample diagnosis; no R2 candidate or Val run is authorized by this report alone.", ""]
+    lines += ["", "## Observed costs and variation", ""]
+    for item in results:
+        path = root / "results/stability" / item["benchmark"] / "stability_summary.json"
+        if not path.is_file():
+            lines.append(f"- {item['benchmark']}: pilot not completed.")
+            continue
+        summary = json.loads(path.read_text())
+        arms = summary.get("per_arm", {})
+        line = [f"- {item['benchmark']}: status={summary['status']}; "]
+        for arm in ("A", "B", "D1"):
+            data = arms.get(arm, {})
+            line.append(f"{arm}={data.get('success_rate')}, input={data.get('total_input_tokens')}, "
+                        f"output={data.get('total_output_tokens')}; ")
+        line.append(f"A/A changed tasks={sum(bool(x.get('changed')) for x in summary.get('a_a_variation', []))}; "
+                    f"error attempts={len(summary.get('error_attempts', []))}.")
+        lines.append("".join(line))
+        lines.append(f"  Reason codes: {', '.join(item.get('reason_codes', [])) or 'none'}. "
+                     f"Extension: {item.get('extension_decision')}.")
+    interaction = root / "results/stability/spreadsheetbench/interaction_summary.json"
+    if interaction.is_file():
+        study = json.loads(interaction.read_text())
+        lines += ["", "## SpreadsheetBench rule-combination check", "",
+                  "The separately frozen Train C/D2 experiment used the same task IDs and two runs per arm.",
+                  "Observed successes and input tokens: " + ", ".join(
+                      f"{arm}={value['successes']}/8, {value['input_tokens']} input" for arm, value in study["per_arm"].items()) + ".",
+                  f"C versus D1 changed scripts in {study['C_vs_D1_script_changed_task_runs']} task-runs; "
+                  f"C versus D2 in {study['C_vs_D2_script_changed_task_runs']} task-runs."]
+    lines += ["", "## Interpretation and decision", "",
+              "Paired effects and task-cluster bootstrap intervals are descriptive because the pilot has only four independent tasks per Benchmark.",
+              "A/B differences measure Skill presence; D1/B differences estimate added rule effect under this controlled setup.",
+              "R1 insights used all original Train. Cross-fitting requires rebuilding M2/M3 without held-out tasks and isolating caches.",
+              "Pilot data are in-sample diagnosis. A rule needs both the prespecified performance/cost gate and clean Train internal validation before R2 generation.",
+              "No candidate means no R2 Skill or new Val run. The official R1 Val gate remains unchanged.", ""]
     report = root / "results/stability/RULE_SELECTION_REPORT.md"
     report.write_text("\n".join(lines), encoding="utf-8")
     write_json(root / "results/stability/RULE_SELECTION.json", results)

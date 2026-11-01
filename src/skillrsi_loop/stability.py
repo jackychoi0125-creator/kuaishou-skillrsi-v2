@@ -158,6 +158,11 @@ def run_fingerprint(root: Path, study: dict[str, Any], arm: str, repeat: int,
             "concurrent": CONCURRENT[benchmark], "infra_retries": plan["budget"]["max_infra_retries_per_run"],
             "timeout_seconds": plan["budget"]["timeout_seconds"][benchmark],
             "plan_sha256": plan["plan_sha256"]}
+    if study.get("id_file"):
+        ids_path = Path(study["id_file"])
+        if json.loads(ids_path.read_text()) != study["task_ids"]:
+            raise ValueError("fixed Train ID file differs from frozen task set")
+        conf["task_id_file_sha256"] = file_sha(ids_path)
     conf["config_sha256"] = digest(conf)
     return conf
 
@@ -451,6 +456,15 @@ def run_benchmark(root: Path, benchmark: str, plan: dict[str, Any], *, dry_run: 
                 manifest["runs"][key] = record
             write_json(out / "runs_manifest.json", manifest)
             for attempt_index in range(len(record["attempts"]), plan["budget"]["max_infra_retries_per_run"] + 1):
+                current_usage = _budget_use(manifests)
+                estimate_one = int(sum(x["input_tokens"] for x in study["historical_strata"].values()) * 1.5)
+                can_attempt, cap = _budget_allows(plan, current_usage, benchmark, len(expected), estimate_one)
+                if can_attempt and current_usage["per_arm_task_executions"].get(f"{benchmark}:{arm}", 0) + len(expected) > plan["budget"]["per_arm_task_executions"]:
+                    can_attempt, cap = False, "per_arm_task_executions"
+                if not can_attempt:
+                    record["status"] = "budget_stopped"
+                    manifest["stopped_reason"] = cap
+                    break
                 record["pending_attempt"] = attempt_index
                 write_json(out / "runs_manifest.json", manifest)
                 attempt = _attempt(root, benchmark, arm, rep, conf,
@@ -470,7 +484,7 @@ def run_benchmark(root: Path, benchmark: str, plan: dict[str, Any], *, dry_run: 
                 record["status"] = "infrastructure_unrecovered"
             write_json(out / "runs_manifest.json", manifest)
             if record["status"] != "valid":
-                manifest["stopped_reason"] = f"invalid_run:{key}:{record['status']}"
+                manifest["stopped_reason"] = manifest.get("stopped_reason") or f"invalid_run:{key}:{record['status']}"
                 write_json(out / "runs_manifest.json", manifest)
                 break
             if stop_after == key:
@@ -585,6 +599,14 @@ def summarize_benchmark(root: Path, benchmark: str, plan: dict[str, Any],
             per_arm[arm]["bridge_status_calls_total"] = sum(r["alfworld"]["bridge_status_tool_calls"] for r in observations)
             per_arm[arm]["no_progress_observations_total"] = sum(
                 len(r["alfworld"]["observed_no_progress_event_ids"]) for r in observations)
+            per_arm[arm]["successful_run_costs"] = [{"task_id": r["task_id"],
+                "official_executed_steps": r["alfworld"]["official_executed_steps"],
+                "official_max_steps": r["alfworld"]["official_max_steps"],
+                "submitted_commands": r["alfworld"]["submitted_commands"],
+                "no_progress_observations": len(r["alfworld"]["observed_no_progress_event_ids"]),
+                "input_tokens": r["input_tokens"], "duration_sec": r["duration_sec"],
+                "trial_path": r["trial_path"]}
+                for r in observations if r["reward"] >= .999]
     aa = []
     for task in study["task_ids"]:
         values = [x["A_reward"] for x in pairs if x["task_id"] == task]

@@ -17,6 +17,7 @@ skillrsi-audit-r1 = "skillrsi_loop.triage:main"
 skillrsi-ablate-train = "skillrsi_loop.ablation:main"
 skillrsi-stability = "skillrsi_loop.stability:main"
 skillrsi-select-rules = "skillrsi_loop.rule_selection:main"
+skillrsi-interaction = "skillrsi_loop.interaction:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

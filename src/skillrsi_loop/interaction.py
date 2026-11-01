@@ -86,6 +86,14 @@ def run(root: Path, *, dry_run: bool = False) -> dict[str, Any]:
         if allowed and (global_usage["input_tokens"] + usage["input_tokens"] + estimate >
                         main["budget"]["max_input_tokens"]):
             allowed, reason = False, "pilot_global_input_budget"
+        if allowed and (global_usage["output_tokens"] + usage["output_tokens"] >=
+                        main["budget"]["max_output_tokens"]):
+            allowed, reason = False, "pilot_global_output_budget"
+        if allowed and (global_usage["wall_seconds"] + usage["wall_seconds"] >=
+                        main["budget"]["max_wall_seconds"]):
+            allowed, reason = False, "pilot_global_wall_budget"
+        if allowed and usage["per_arm_task_executions"].get(f"{BENCHMARK}:{arm}", 0) + len(expected) > INTERACTION_BUDGET["per_arm_task_executions"]:
+            allowed, reason = False, "interaction_per_arm_task_budget"
         if not allowed:
             state["stopped_reason"] = reason
             break
@@ -94,9 +102,23 @@ def run(root: Path, *, dry_run: bool = False) -> dict[str, Any]:
         write_json(state_path, state)
         for attempt_index in range(len(record["attempts"]), INTERACTION_BUDGET["max_infra_retries_per_run"] + 1):
             current = _budget_use({BENCHMARK: state})
-            if current["harbor_task_executions"] + len(expected) > INTERACTION_BUDGET["max_harbor_task_executions"]:
+            can_attempt, cap = _budget_allows(plan, current, BENCHMARK, len(expected), estimate)
+            if can_attempt and current["per_arm_task_executions"].get(f"{BENCHMARK}:{arm}", 0) + len(expected) > INTERACTION_BUDGET["per_arm_task_executions"]:
+                can_attempt, cap = False, "interaction_per_arm_task_budget"
+            if can_attempt:
+                combined = {metric: global_usage[metric] + current[metric] for metric in
+                            ("harbor_task_executions", "input_tokens", "output_tokens", "wall_seconds")}
+                if combined["harbor_task_executions"] + len(expected) > main["budget"]["max_harbor_task_executions"]:
+                    can_attempt, cap = False, "pilot_global_task_budget"
+                elif combined["input_tokens"] + estimate > main["budget"]["max_input_tokens"]:
+                    can_attempt, cap = False, "pilot_global_input_budget"
+                elif combined["output_tokens"] >= main["budget"]["max_output_tokens"]:
+                    can_attempt, cap = False, "pilot_global_output_budget"
+                elif combined["wall_seconds"] >= main["budget"]["max_wall_seconds"]:
+                    can_attempt, cap = False, "pilot_global_wall_budget"
+            if not can_attempt:
                 record["status"] = "budget_stopped"
-                state["stopped_reason"] = "interaction_task_budget"
+                state["stopped_reason"] = cap
                 break
             record["pending_attempt"] = attempt_index
             write_json(state_path, state)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +136,44 @@ def _paired_records(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def paired_frequency_signal(pairs: list[dict[str, Any]], min_repeats: int = 2) -> dict[str, Any]:
+    """Describe task-level repeated effects without counting repeats as new tasks."""
+    by_task: dict[str, list[dict[str, Any]]] = {}
+    for row in pairs:
+        by_task.setdefault(row["task_id"], []).append(row)
+    tasks = []
+    for task_id, rows in sorted(by_task.items()):
+        if len(rows) < min_repeats:
+            continue
+        frequencies = {arm: sum(float(row[f"{arm}_reward"]) for row in rows) / len(rows)
+                       for arm in ("A", "B", "D1")}
+        tasks.append({"task_id": task_id, "n_repeats": len(rows), "frequencies": frequencies,
+                      "presence_delta": round(frequencies["B"] - frequencies["A"], 4),
+                      "rule_delta": round(frequencies["D1"] - frequencies["B"], 4),
+                      "paired_disagreements": sum(float(row["D1_reward"]) != float(row["B_reward"]) for row in rows),
+                      "b_ceiling": frequencies["B"] >= .999})
+    positive = [row["task_id"] for row in tasks if row["rule_delta"] > 0]
+    negative = [row["task_id"] for row in tasks if row["rule_delta"] < 0]
+    def interval(key: str) -> list[float] | None:
+        if not tasks:
+            return None
+        rng = random.Random(16)
+        means = sorted(sum(rng.choice(tasks)[key] for _ in tasks) / len(tasks) for _ in range(2000))
+        return [round(means[49], 4), round(means[1949], 4)]
+    return {"effective_task_count": len(tasks), "paired_run_count": sum(x["n_repeats"] for x in tasks),
+            "tasks_with_b_headroom": sum(not x["b_ceiling"] for x in tasks),
+            "ceiling_task_count": sum(x["b_ceiling"] for x in tasks),
+            "structural_ceiling": bool(tasks) and all(x["b_ceiling"] for x in tasks),
+            "improved_task_ids": positive, "regressed_task_ids": negative,
+            "inconsistent_paired_task_ids": [x["task_id"] for x in tasks if x["paired_disagreements"] and
+                                             abs(x["rule_delta"]) < 1e-9],
+            "mean_presence_delta_by_task": round(sum(x["presence_delta"] for x in tasks) / len(tasks), 4) if tasks else None,
+            "mean_rule_delta_by_task": round(sum(x["rule_delta"] for x in tasks) / len(tasks), 4) if tasks else None,
+            "task_cluster_bootstrap_presence_95pct_descriptive": interval("presence_delta"),
+            "task_cluster_bootstrap_rule_95pct_descriptive": interval("rule_delta"),
+            "task_frequencies": tasks}
+
+
 def select_one(root: Path, benchmark: str, policy: dict[str, Any]) -> dict[str, Any]:
     base = root / "results/stability" / benchmark
     summary_path = base / "stability_summary.json"
@@ -152,13 +191,9 @@ def select_one(root: Path, benchmark: str, policy: dict[str, Any]) -> dict[str, 
         return {"benchmark": benchmark, "rule_arm": "D1", "status": "needs_more_evidence",
                 "reason": "pilot_not_run", "insight_ids": insight_ids}
     summary = json.loads(summary_path.read_text())
-    by_task: dict[str, list[dict[str, Any]]] = {}
-    for row in pairs:
-        by_task.setdefault(row["task_id"], []).append(row)
-    improved = sorted(task for task, rows in by_task.items() if len(rows) >= policy["min_complete_repeats"] and
-                      all(float(r["D1_reward"]) > float(r["B_reward"]) for r in rows))
-    regressed = sorted(task for task, rows in by_task.items() if any(
-        float(r["D1_reward"]) < float(r["B_reward"]) for r in rows))
+    signal = paired_frequency_signal(pairs, policy["min_complete_repeats"])
+    improved = signal["improved_task_ids"]
+    regressed = signal["regressed_task_ids"]
     input_d1 = sum(float(r["D1_input_tokens"]) for r in pairs)
     input_b = sum(float(r["B_input_tokens"]) for r in pairs)
     duration_d1 = sum(float(r["D1_duration_sec"]) for r in pairs)
@@ -167,13 +202,19 @@ def select_one(root: Path, benchmark: str, policy: dict[str, Any]) -> dict[str, 
     duration_ratio = duration_d1 / duration_b if duration_b else None
     effect = summary["effects"]["rule_effect"]["paired_mean_reward_delta"]
     presence = summary["effects"]["presence_effect"]["paired_mean_reward_delta"]
-    holdout = list(summary.get("a_a_variation", []))
-    crossfit = crossfit_audit(root, benchmark, [x["task_id"] for x in holdout], insight_ids)
+    r16_plan = root / "results/r16/EXPERIMENT_PLAN.json"
+    if r16_plan.is_file():
+        holdout_ids = json.loads(r16_plan.read_text())["studies"][benchmark]["holdout_task_ids"]
+        crossfit = crossfit_audit(root, benchmark, holdout_ids, insight_ids)
+    else:
+        crossfit = {"status": "unverifiable", "reason": "no_prespecified_train_holdout"}
     reasons = []
     if summary["status"] != "complete":
         reasons.append("incomplete_paired_repeats")
     if len(improved) < policy["min_distinct_improved_tasks_vs_B"]:
         reasons.append("insufficient_independent_improved_tasks")
+    if signal["structural_ceiling"]:
+        reasons.append("b_arm_at_ceiling_no_observable_headroom")
     if effect is None or effect < policy["min_mean_reward_delta_vs_B"]:
         reasons.append("no_repeated_D1_over_B_gain")
     if regressed:
@@ -213,7 +254,8 @@ def select_one(root: Path, benchmark: str, policy: dict[str, Any]) -> dict[str, 
               "presence_effect_B_minus_A": presence, "rule_effect_D1_minus_B": effect,
               "rule_effect_cluster_bootstrap": summary["effects"]["rule_effect"]["task_cluster_bootstrap_95pct_descriptive"],
               "stable_improved_task_ids": improved, "regressed_task_ids": regressed,
-              "n_distinct_tasks": len(by_task), "n_paired_task_runs": len(pairs),
+              "n_distinct_tasks": signal["effective_task_count"], "n_paired_task_runs": len(pairs),
+              "frequency_signal": signal,
               "input_ratio_D1_over_B": round(input_ratio, 4) if input_ratio is not None else None,
               "duration_ratio_D1_over_B": round(duration_ratio, 4) if duration_ratio is not None else None,
               "crossfit_audit": crossfit, "validation_scope": "in_sample_diagnostic_only",

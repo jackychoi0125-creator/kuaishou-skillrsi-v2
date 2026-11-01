@@ -1,5 +1,7 @@
 # SkillRSI v2 — 统一正反轨迹画像与对照分析
 
+R1.6 的 Skill 暴露审计、Source/Holdout 隔离、单规则编译和官方 Train 内部验证流程见 [R16_EXPOSURE_CROSSFIT.md](docs/R16_EXPOSURE_CROSSFIT.md)。
+
 ## R1 自进化闭环
 
 `skillrsi-loop r1 --benchmark all --mode real --resume` 顺序执行每个 Benchmark 的 M3 经验提取、M4 单候选 Skill 生成、官方 Harbor Val 基线复测、候选评测和逐题门控。可用 `--stop-after m3|m4|baseline|candidate` 中断，用 `--resume` 幂等恢复。`--mode dry-run` 只检查可选证据，不产生模型调用或虚构分数。

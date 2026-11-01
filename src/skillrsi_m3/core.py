@@ -78,7 +78,7 @@ class EvidenceSelector:
                 trace_ids = set(group["trace_ids"]) & self.store.profiles.keys()
                 if not trace_ids:
                     continue
-                cost_chars = sum((self.store.profiles[t].get("outcome", {}).get("metrics", {}) or {}).get("trace_chars") or 0
+                cost_chars = sum(int((self.store.profiles[t].get("outcome", {}).get("metrics", {}) or {}).get("trace_chars") or 0)
                                  for t in trace_ids)
                 coverage = len({self.store.profiles[t].get("task_signature", {}).get("task_subtype", "unknown")
                                 for t in trace_ids})
@@ -173,6 +173,9 @@ class InsightExtractor:
                   "trigger_conditions array, avoid_conditions array, recommended_behavior, "
                   "supporting_refs array of {trace_id,event_ids}, counterexample_refs array, "
                   "source_channel (positive|negative|conditional), causal_status (hypothesis_only|evidence_supported). "
+                  "Also return observed_problem, expected_behavior_change, expected_observation, "
+                  "estimated_cost_risk (low|medium|high|unknown). Expected observation must be measurable "
+                  "from later Trace events, not a claim that the answer will improve. "
                   "Omit weak insights. Do not give task answers or exact action routes.")
         response, call_id = self.client.ask("m3_extract", system,
                                             json.dumps(payload, ensure_ascii=False), max_tokens=3000)
@@ -216,6 +219,18 @@ class InsightExtractor:
                             "avoid_conditions": list(item.get("avoid_conditions") or []),
                             "principle": item["principle"].strip(),
                             "recommended_behavior": item["recommended_behavior"].strip(),
+                            "observed_problem": str(item.get("observed_problem") or
+                                                    ", ".join(str(x) for x in group.get("observed_symptoms", [])) or "not_established"),
+                            "expected_behavior_change": str(item.get("expected_behavior_change") or
+                                                            item["recommended_behavior"]).strip(),
+                            "expected_observation": str(item.get("expected_observation") or
+                                                        "an observable post-trigger action or check event").strip(),
+                            "measurement_specificity": bool(item.get("expected_observation")),
+                            "estimated_cost_risk": item.get("estimated_cost_risk") if
+                                                    item.get("estimated_cost_risk") in {"low", "medium", "high", "unknown"} else "unknown",
+                            "applicability_scope": {"triggers": list(item.get("trigger_conditions") or []),
+                                                    "exclusions": list(item.get("avoid_conditions") or [])},
+                            "utility_status": "unverified", "utility_evidence": [],
                             "source_channel": "conditional" if group["kind"] == "contrast" else
                             (item.get("source_channel") if item.get("source_channel") in
                              {"positive", "negative", "conditional"} else group["kind"]),
@@ -290,6 +305,13 @@ def observed_math_definition_check(store: TraceStore, m2_dir: Path) -> list[dict
                          "avoid_conditions": ["No local definition is supplied"],
                          "principle": "Check the problem's local definitions before applying a familiar result.",
                          "recommended_behavior": "Reread the stated definition, restate what it means in this problem, and check that subsequent reasoning uses that meaning.",
+                         "observed_problem": "A locally defined symbol requires explicit interpretation",
+                         "expected_behavior_change": "Reread and restate the local definition before its first use",
+                         "expected_observation": "A visible restatement precedes later use of the defined symbol",
+                         "measurement_specificity": True, "estimated_cost_risk": "medium",
+                         "applicability_scope": {"triggers": ["A local symbol or relation is explicitly defined"],
+                                                 "exclusions": ["No local definition is supplied"]},
+                         "utility_status": "unverified", "utility_evidence": [],
                          "source_channel": "positive", "source_group_ids": [group["group_id"]],
                          "supporting_refs": [store.ref(profile["trace_id"], [event_id])],
                          "counterexample_refs": [], "evidence_grade": "single_trace_hypothesis",
@@ -362,12 +384,47 @@ class EvidenceVerifier:
                 errors.append("unsupported_causal_upgrade")
             if insight["benchmark"] == "livemath" and any(w in insight["principle"].lower() for w in ("calculation error", "reasoning error", "计算错误", "推理错误")):
                 errors.append("math_root_requires_independent_proof")
+            if insight["benchmark"] == "alfworld" and re.search(
+                    r"(?i)common container|frequently.used container|search order|location priority",
+                    insight.get("principle", "") + " " + insight.get("recommended_behavior", "")):
+                errors.append("unsupported_search_priority")
+            if (not errors and insight["benchmark"] == "alfworld" and re.search(
+                    r"(?i)nothing happens|no.effect|no progress", " ".join(insight["trigger_conditions"])) and
+                    re.search(r"(?i)admissible_commands|admissible commands", insight.get("recommended_behavior", ""))):
+                evidence = []
+                for ref in insight["supporting_refs"]:
+                    matching = [self.store.get(ref["trace_id"], event_id)["text"] for event_id in ref["event_ids"]]
+                    if any(re.search(r"(?i)nothing happens", text) and "admissible" in text.lower()
+                           for text in matching):
+                        evidence.append(ref["trace_id"])
+                if len(set(evidence)) >= 2:
+                    insight["trigger_conditions"] = [
+                        "An action receives explicit no-progress feedback",
+                        "The current observation explicitly lists admissible commands"]
+                    insight["avoid_conditions"] = list(dict.fromkeys(insight["avoid_conditions"] +
+                        ["The current observation has no admissible-command list"]))
+                    insight["expected_behavior_change"] = (
+                        "After no-progress feedback, choose a different command from the currently visible admissible commands")
+                    insight["expected_observation"] = (
+                        "The next submitted environment command differs from the rejected command and is listed in the preceding observation")
+                    insight["measurement_specificity"] = True
+                    insight["estimated_cost_risk"] = "medium"
+                    insight["operationalization_method"] = "deterministic_multi_trace_no_progress_and_admissible_feedback"
             if errors:
                 insight["status"] = "rejected"
             elif insight["benchmark"] == "livemath" and insight.get("extraction_method") != "deterministic_observed_behavior":
                 insight["status"] = "pending_math_validation"
             else:
                 insight["status"] = "verified_observation"
+            insight["evidence_validity"] = "verified" if insight["status"] in {"verified_observation", "pending_math_validation"} else "invalid"
+            insight.setdefault("utility_status", "unverified")
+            insight.setdefault("utility_evidence", [])
+            insight.setdefault("expected_behavior_change", insight.get("recommended_behavior", ""))
+            insight.setdefault("expected_observation", "an observable post-trigger action or check event")
+            insight.setdefault("measurement_specificity", False)
+            insight.setdefault("estimated_cost_risk", "unknown")
+            insight.setdefault("applicability_scope", {"triggers": insight.get("trigger_conditions", []),
+                                                      "exclusions": insight.get("avoid_conditions", [])})
             independent = len({r["trace_id"] for r in insight["supporting_refs"]})
             counterexamples = len({r["trace_id"] for r in insight["counterexample_refs"]})
             insight["semantic_support"] = ("conflicted" if counterexamples or insight.get("risk_level") == "high" else
@@ -386,23 +443,24 @@ class EvidenceVerifier:
                 "details": details}
 
 
-def run(m2_dir: Path, benchmark: str, out_dir: Path, client: KimiClient | None, *, dry_run: bool = False) -> dict[str, Any]:
+def run(m2_dir: Path, benchmark: str, out_dir: Path, client: KimiClient | None, *, dry_run: bool = False,
+        max_groups: int = 8, deterministic_only: bool = False) -> dict[str, Any]:
     audit_summary = read_json(m2_dir / "evidence_audit.json")["summary"]
     if audit_summary.get("event_ref_integrity") != 1.0:
         raise ValueError("M2 L2 evidence audit contains broken event references")
     store = TraceStore(m2_dir / "trace_profiles.jsonl", benchmark)
     if not store.profiles:
         raise ValueError(f"No eligible Train traces for {benchmark}")
-    groups = EvidenceSelector(m2_dir, store).select()
+    groups = EvidenceSelector(m2_dir, store).select(max_groups=max_groups)
     selected = [_evidence_payload(g, store) for g in groups]
     write_json(out_dir / "selected_evidence.json", selected)
     if dry_run:
         return {"selected_groups": len(groups), "dry_run": True, "model_calls": 0}
-    if client is None:
+    if client is None and not deterministic_only:
         raise ValueError("real M3 requires Kimi client")
-    extracted = InsightExtractor(store, client).extract(groups)
+    extracted = [] if deterministic_only else InsightExtractor(store, client).extract(groups)
     if benchmark == "livemath":
-        extracted = generalize_math(extracted, client)
+        extracted = extracted if deterministic_only else generalize_math(extracted, client)
         extracted += observed_math_definition_check(store, m2_dir)
     pool, ops = InsightConsolidator().consolidate(extracted)
     audit = EvidenceVerifier(store).verify(pool)
@@ -414,5 +472,7 @@ def run(m2_dir: Path, benchmark: str, out_dir: Path, client: KimiClient | None, 
     (out_dir / "insights.jsonl").write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in pool))
     (out_dir / "insight_operations.jsonl").write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in ops))
     write_json(out_dir / "insight_audit.json", audit)
-    write_json(out_dir / "usage.json", client.usage())
+    write_json(out_dir / "usage.json", client.usage() if client is not None else
+               {"model": None, "api_calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                "cache_tokens": 0, "calls": [], "mode": "deterministic_only"})
     return {"selected_groups": len(groups), "insights": len(pool), **audit}

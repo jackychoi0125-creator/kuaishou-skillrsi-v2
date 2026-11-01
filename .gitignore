@@ -10,6 +10,7 @@ results/r1/
 results/train_ablation/
 results/stability/
 results/r2/
+results/r16/
 workspace/
 results/*.log
 results/prepare-summary.json

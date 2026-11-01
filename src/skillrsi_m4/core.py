@@ -197,3 +197,70 @@ def run(benchmark: str, m3_dir: Path, skill_root: Path, out_dir: Path,
     write_json(out_dir / "candidate_manifest.json", manifest)
     write_json(out_dir / "usage.json", client.usage())
     return manifest
+
+
+def compile_single_rule(benchmark: str, insights_path: Path, skill_root: Path,
+                        out_dir: Path, *, dry_run: bool = False) -> dict[str, Any]:
+    """Compile one measurable Source-Train hypothesis without lexical rule mapping."""
+    insights = [json.loads(line) for line in insights_path.read_text().splitlines() if line.strip()] if insights_path.is_file() else []
+    eligible = [item for item in insights if item.get("benchmark") == benchmark and
+                item.get("status") == "verified_observation" and item.get("evidence_validity") == "verified" and
+                item.get("utility_status", "unverified") not in {"negative_signal", "conflicted"} and
+                item.get("measurement_specificity") and item.get("estimated_cost_risk") in {"low", "medium"} and
+                item.get("trigger_conditions") and item.get("avoid_conditions") is not None and
+                item.get("expected_behavior_change") and item.get("expected_observation") and
+                item.get("supporting_refs") and item.get("risk_level") != "high" and
+                (benchmark != "livemath" or item.get("extraction_method") == "deterministic_observed_behavior")]
+    eligible.sort(key=lambda item: (-len({ref["trace_id"] for ref in item["supporting_refs"]}),
+                                    item.get("estimated_cost_risk") != "low", item["insight_id"]))
+    if not eligible:
+        manifest = {"benchmark": benchmark, "status": "no_candidate",
+                    "reason": "no_measurable_low_risk_source_train_insight", "model_calls": 0}
+        if not dry_run:
+            write_json(out_dir / "candidate_manifest.json", manifest)
+        return manifest
+    item = eligible[0]
+    source = {key: item[key] for key in ("insight_id", "trigger_conditions", "avoid_conditions",
+                                        "expected_behavior_change", "expected_observation", "estimated_cost_risk",
+                                        "supporting_refs", "counterexample_refs", "utility_status")}
+    if dry_run:
+        return {"benchmark": benchmark, "status": "dry_run", "selected_insight_id": item["insight_id"],
+                "model_calls": 0, "candidate_scores": None}
+    trigger = "; and ".join(condition.strip() for condition in item["trigger_conditions"][:3])
+    avoids = [condition.strip() for condition in item["avoid_conditions"][:3]] or [
+        "The trigger is absent or the task is simple enough to complete directly."]
+    avoid = "; ".join(avoids)
+    behavior = item["expected_behavior_change"].strip()
+    observation = item["expected_observation"].strip()
+    name = f"{benchmark}-r16-single-rule"
+    description = f"Conditional agent check for {benchmark} tasks; use only when the stated trigger applies."
+    markdown = (f"---\nname: {name}\ndescription: {description}\n---\n\n"
+                f"# When to use\n\n- {trigger}\n\n# Procedure\n\n- {behavior}\n\n"
+                f"# Avoid\n\n" + "".join(f"- {condition}\n" for condition in avoids) +
+                "- Do not add this check to a simple task when the trigger is absent.\n\n"
+                f"# Validation\n\n- {observation}\n")
+    errors = validate_skill(markdown, benchmark, [item])
+    if errors:
+        manifest = {"benchmark": benchmark, "status": "no_candidate", "reason": "static_audit_failed",
+                    "errors": errors, "selected_insight_id": item["insight_id"], "model_calls": 0}
+        write_json(out_dir / "candidate_manifest.json", manifest)
+        return manifest
+    target = skill_root / benchmark / name / "SKILL.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(markdown, encoding="utf-8")
+    trace_ids = sorted({ref["trace_id"] for ref in item["supporting_refs"]})
+    rule = {"rule_id": "rule_" + hashlib.sha256(item["insight_id"].encode()).hexdigest()[:12],
+            "source_insight_ids": [item["insight_id"]], "evidence_trace_ids": trace_ids,
+            "trigger": trigger, "avoid": avoid, "expected_behavior": behavior,
+            "expected_observation": observation, "risk": item.get("risk_level", "unknown"),
+            "predicted_cost": item["estimated_cost_risk"], "utility_status": item.get("utility_status", "unverified"),
+            "mapping_status": "direct_structured_insight"}
+    manifest = {"benchmark": benchmark, "status": "candidate_for_internal_validation",
+                "skill_path": str(target), "skills_dir": str(target.parent.parent),
+                "skill_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                "skill_bytes": target.stat().st_size, "skill_token_proxy": token_proxy(markdown),
+                "rule": rule, "model_calls": 0, "accepted": False,
+                "data_scope": "source_train_only; holdout_has_not_been_used_for_generation"}
+    write_json(out_dir / "source_prompt.json", source)
+    write_json(out_dir / "candidate_manifest.json", manifest)
+    return manifest

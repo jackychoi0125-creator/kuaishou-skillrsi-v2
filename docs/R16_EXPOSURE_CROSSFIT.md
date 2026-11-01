@@ -21,3 +21,9 @@ The official Harbor Train Holdout comparison uses four arms on identical frozen 
 ## Tests
 
 Run `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -q`. Tests require no API key and cover split isolation, group and Insight leaks, strict event and SHA references, no-op and metadata-matched controls, ceiling diagnostics, task-level repeated effects, one-repeat non-promotion, and no-candidate Harbor skipping.
+
+## First R1.6 execution
+
+The frozen Source-only M2 generated 76 SpreadsheetBench, 35 ALFWorld and 31 LiveMath profiles. M3 used two real Kimi calls (26,125 prompt and 3,068 completion Tokens). SpreadsheetBench and LiveMath produced no responsible single-rule candidate. ALFWorld produced one unaccepted source-backed rule.
+
+The official ALFWorld Train Holdout ran A/B/C/D once on the same four tasks: 4/4, 3/4, 1/4 and 3/4. Input Tokens were 736,071 / 1,408,852 / 2,198,547 / 1,534,982. The 16 executions used 5,878,452 input and 437,526 output Tokens. The controller stopped before the second complete repeat block under the frozen 7,000,000 input Token budget. D tied B in total success and cost about 1.98 times B in summed per-task duration; one task improved while another regressed. This single repeat does not establish stable rule utility. No R2 candidate was accepted and no new Val was run. Raw runs, task IDs and detailed audit evidence remain in ignored `results/r16/`.

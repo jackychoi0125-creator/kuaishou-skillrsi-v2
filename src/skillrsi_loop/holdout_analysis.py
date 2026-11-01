@@ -59,6 +59,7 @@ def analyze(root: Path, benchmark: str) -> dict[str, Any]:
                      "A_reward": row["B"]["reward"], "B_reward": row["C"]["reward"],
                      "D1_reward": row["D"]["reward"]} for row in paired]
     matched_signal = paired_frequency_signal(matched_rows, min_repeats=2)
+    matched_descriptive = paired_frequency_signal(matched_rows, min_repeats=1)
     exposure = []
     errors = []
     controls = json.loads((base / "controls/controls_manifest.json").read_text())
@@ -109,6 +110,7 @@ def analyze(root: Path, benchmark: str) -> dict[str, Any]:
               "counts": counts, "action_totals": action_totals, "run_errors": run_errors,
               "descriptive_observed_signal": descriptive,
               "promotion_signal": signal, "metadata_matched_signal_D_minus_C": matched_signal,
+              "metadata_matched_descriptive_D_minus_C": matched_descriptive,
               "input_ratio_D_over_B": input_ratio,
               "duration_ratio_D_over_B": duration_ratio, "crossfit_clean": clean,
               "exposure": exposure, "exposure_errors": errors,

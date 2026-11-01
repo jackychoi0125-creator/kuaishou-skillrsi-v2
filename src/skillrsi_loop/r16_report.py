@@ -47,6 +47,7 @@ def run(root: Path) -> dict[str, Any]:
         candidate["crossfit_status"] = next(item["status"] for item in provenance if item["benchmark"] == benchmark)
         candidate["accepted"] = False
         candidate["val_eligible"] = False
+        candidate["selection_status"] = "no_candidate" if candidate["status"] == "no_candidate" else "not_validated"
         analysis_file = base / "holdout_analysis.json"
         if analysis_file.is_file():
             analysis = json.loads(analysis_file.read_text())
@@ -54,6 +55,7 @@ def run(root: Path) -> dict[str, Any]:
             candidate["holdout_reason_codes"] = analysis["reason_codes"]
             candidate["holdout_complete_repeats"] = analysis["complete_repeats"]
             candidate["val_eligible"] = analysis["candidate_eligible_for_val"]
+            candidate["selection_status"] = "eligible_for_val" if candidate["val_eligible"] else "needs_more_evidence"
         candidates.append(candidate)
     write_json(out / "insight_quality.json", quality)
     write_json(out / "rule_candidates.json", candidates)
@@ -80,16 +82,16 @@ def run(root: Path) -> dict[str, Any]:
         val_rows = [row for row in records if row["benchmark"] == benchmark and
                     row["source"] == "r1_official_val_read_only" and row["configured"]]
         lines.append(f"| {benchmark} | {len(val_rows)} | {sum(row['explicitly_read'] for row in val_rows)} |")
-    lines += [
+    lines += ["",
              "Source-only M2 profiles: SpreadsheetBench 76, ALFWorld 35, LiveMath 31; four frozen Holdout tasks per Benchmark were excluded.",
              f"New Kimi API usage: {usage['api_calls']} calls, {usage['prompt_tokens']} Prompt Tokens, "
              f"{usage['completion_tokens']} Completion Tokens, {usage['cache_tokens']} Cache Tokens.", "",
-             "| Benchmark | Source M3 insights | Measurable | M4 status | Isolation |",
-             "|---|---:|---:|---|---|"]
+             "| Benchmark | Source M3 insights | Measurable | M4 status | Selection | Isolation |",
+             "|---|---:|---:|---|---|---|"]
     for candidate in candidates:
         benchmark = candidate["benchmark"]
         lines.append(f"| {benchmark} | {quality[benchmark]['insights']} | {quality[benchmark]['measurable']} | "
-                     f"{candidate['status']} | {candidate['crossfit_status']} |")
+                     f"{candidate['status']} | {candidate['selection_status']} | {candidate['crossfit_status']} |")
     lines += ["", "## Internal Holdout", ""]
     if holdout:
         lines.append(f"ALFWorld official Harbor: status={holdout['status']}; complete repeats={holdout['complete_repeats']}; "
@@ -106,7 +108,15 @@ def run(root: Path) -> dict[str, Any]:
                          f"D−C={analysis['metadata_matched_signal_D_minus_C']['mean_rule_delta_by_task']}; "
                          f"descriptive task-cluster interval "
                          f"{signal['task_cluster_bootstrap_rule_95pct_descriptive']}.")
-            lines.append(f"D/B input cost ratio={analysis['input_ratio_D_over_B']}, duration ratio="
+            if analysis["descriptive_observed_signal"]["effective_task_count"]:
+                one = analysis["descriptive_observed_signal"]
+                lines.append(f"Observed one-repeat task differences only (not promotion evidence): "
+                             f"B−A={one['mean_presence_delta_by_task']}, "
+                             f"D−B={one['mean_rule_delta_by_task']}, "
+                             f"D−C={analysis['metadata_matched_descriptive_D_minus_C']['mean_rule_delta_by_task']} "
+                             f"across {one['effective_task_count']} tasks; D vs B improved "
+                             f"{len(one['improved_task_ids'])} and regressed {len(one['regressed_task_ids'])} tasks.")
+            lines.append(f"D/B input cost ratio={analysis['input_ratio_D_over_B']}, summed per-task duration ratio="
                          f"{analysis['duration_ratio_D_over_B']}; explicit Skill reads in Holdout="
                          f"{sum(x['explicitly_read'] for x in analysis['exposure'])}/"
                          f"{len(analysis['exposure'])}. Eligible for Val={analysis['candidate_eligible_for_val']}; "
@@ -115,6 +125,8 @@ def run(root: Path) -> dict[str, Any]:
                          ", ".join(f"{arm}={values['pi_tool_calls']}/{values['submitted_commands']}/"
                                    f"{values['official_executed_steps']}/{values['observed_no_progress_events']}"
                                    for arm, values in analysis["action_totals"].items()) + ".")
+            lines.append("Controller wall seconds (arms run tasks concurrently): " + ", ".join(
+                f"{arm}={round(values['controller_seconds'], 1)}" for arm, values in analysis["run_errors"].items()) + ".")
     else:
         lines.append("No Holdout Harbor comparison has completed yet.")
     lines += ["", "## Interpretation and open questions", "",

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from skillrsi_m3.client import KimiClient
-from skillrsi_m3.core import write_json
+from skillrsi_m3.core import inverted_avoid_condition, write_json
 
 MAX_CHARS = 8000
 MAX_TOKEN_PROXY = 1500
@@ -112,10 +112,20 @@ def validate_skill(text: str, benchmark: str, insights: list[dict[str, Any]]) ->
     applicability = next((part for part in sections if part.lower().startswith("when to use")), "")
     procedure = next((part for part in sections if part.lower().startswith("procedure")), "")
     avoid = next((part for part in sections if part.lower().startswith("avoid")), "")
+    if inverted_avoid_condition([line for line in avoid.splitlines() if line.lstrip().startswith("- ")]):
+        errors.append("inverted_avoid_condition")
     if not re.search(r"(?m)^\s*(?:-|\d+\.)\s+\S+", applicability):
         errors.append("missing_applicability_condition")
     if re.search(r"(?i)\b(?:always|on every task|for every task|for all tasks)\b", procedure):
         errors.append("unconditional_procedure")
+    if re.search(r"(?i)\b(?:every|each|any) (?:feedback|observation|step|task)\b", applicability):
+        errors.append("overbroad_trigger")
+    if re.search(r"(?i)\b(?:repeat until|loop until|keep checking|recheck every|check again and again)\b", procedure):
+        errors.append("unbounded_repeat_check")
+    if benchmark == "spreadsheetbench" and re.search(r"(?i)\b(?:entire workbook|all worksheets|every cell|full workbook traversal)\b", procedure):
+        errors.append("unrelated_workbook_inspection")
+    if benchmark == "livemath" and re.search(r"(?i)\b(?:rederive the entire|redo the full|solve the whole problem again)\b", procedure):
+        errors.append("unbounded_math_rederivation")
     def directives(part: str) -> set[str]:
         return {re.sub(r"(?i)\b(?:do not|don't|never|avoid|must|always)\b", "", line).strip(" -.*`\t").lower()
                 for line in part.splitlines() if line.startswith(("- ", "1. ", "2. ", "3. ")) and len(line) > 12}
@@ -200,7 +210,7 @@ def run(benchmark: str, m3_dir: Path, skill_root: Path, out_dir: Path,
 
 
 def compile_single_rule(benchmark: str, insights_path: Path, skill_root: Path,
-                        out_dir: Path, *, dry_run: bool = False) -> dict[str, Any]:
+                        out_dir: Path, *, dry_run: bool = False, version: str = "r16") -> dict[str, Any]:
     """Compile one measurable Source-Train hypothesis without lexical rule mapping."""
     insights = [json.loads(line) for line in insights_path.read_text().splitlines() if line.strip()] if insights_path.is_file() else []
     eligible = [item for item in insights if item.get("benchmark") == benchmark and
@@ -208,8 +218,15 @@ def compile_single_rule(benchmark: str, insights_path: Path, skill_root: Path,
                 item.get("utility_status", "unverified") not in {"negative_signal", "conflicted"} and
                 item.get("measurement_specificity") and item.get("estimated_cost_risk") in {"low", "medium"} and
                 item.get("trigger_conditions") and item.get("avoid_conditions") is not None and
+                not inverted_avoid_condition(item.get("avoid_conditions") or []) and
                 item.get("expected_behavior_change") and item.get("expected_observation") and
                 item.get("supporting_refs") and item.get("risk_level") != "high" and
+                isinstance(item.get("cost_bound"), dict) and
+                isinstance(item["cost_bound"].get("max_extra_tool_actions"), int) and
+                0 <= item["cost_bound"]["max_extra_tool_actions"] <= 1 and
+                isinstance(item["cost_bound"].get("max_additional_checks"), int) and
+                0 <= item["cost_bound"]["max_additional_checks"] <= 1 and
+                bool(item["cost_bound"].get("stop_condition")) and
                 (benchmark != "livemath" or item.get("extraction_method") == "deterministic_observed_behavior")]
     eligible.sort(key=lambda item: (-len({ref["trace_id"] for ref in item["supporting_refs"]}),
                                     item.get("estimated_cost_risk") != "low", item["insight_id"]))
@@ -222,7 +239,7 @@ def compile_single_rule(benchmark: str, insights_path: Path, skill_root: Path,
     item = eligible[0]
     source = {key: item[key] for key in ("insight_id", "trigger_conditions", "avoid_conditions",
                                         "expected_behavior_change", "expected_observation", "estimated_cost_risk",
-                                        "supporting_refs", "counterexample_refs", "utility_status")}
+                                        "supporting_refs", "counterexample_refs", "utility_status", "cost_bound")}
     if dry_run:
         return {"benchmark": benchmark, "status": "dry_run", "selected_insight_id": item["insight_id"],
                 "model_calls": 0, "candidate_scores": None}
@@ -232,13 +249,20 @@ def compile_single_rule(benchmark: str, insights_path: Path, skill_root: Path,
     avoid = "; ".join(avoids)
     behavior = item["expected_behavior_change"].strip()
     observation = item["expected_observation"].strip()
-    name = f"{benchmark}-r16-single-rule"
+    extra_actions = item["cost_bound"]["max_extra_tool_actions"]
+    extra_checks = item["cost_bound"]["max_additional_checks"]
+    if not re.fullmatch(r"r[0-9]+", version):
+        raise ValueError("invalid Skill version")
+    name = f"{benchmark}-{version}-single-rule"
     description = f"Conditional agent check for {benchmark} tasks; use only when the stated trigger applies."
     markdown = (f"---\nname: {name}\ndescription: {description}\n---\n\n"
                 f"# When to use\n\n- {trigger}\n\n# Procedure\n\n- {behavior}\n\n"
                 f"# Avoid\n\n" + "".join(f"- {condition}\n" for condition in avoids) +
                 "- Do not add this check to a simple task when the trigger is absent.\n\n"
-                f"# Validation\n\n- {observation}\n")
+                f"# Validation\n\n- {observation}\n\n"
+                f"# Cost bound\n\n- Add at most {extra_actions} extra tool {'action' if extra_actions == 1 else 'actions'} "
+                f"and {extra_checks} additional {'check' if extra_checks == 1 else 'checks'}. "
+                f"Stop when {item['cost_bound']['stop_condition']}\n")
     errors = validate_skill(markdown, benchmark, [item])
     if errors:
         manifest = {"benchmark": benchmark, "status": "no_candidate", "reason": "static_audit_failed",
@@ -254,8 +278,9 @@ def compile_single_rule(benchmark: str, insights_path: Path, skill_root: Path,
             "trigger": trigger, "avoid": avoid, "expected_behavior": behavior,
             "expected_observation": observation, "risk": item.get("risk_level", "unknown"),
             "predicted_cost": item["estimated_cost_risk"], "utility_status": item.get("utility_status", "unverified"),
+            "cost_bound": item["cost_bound"],
             "mapping_status": "direct_structured_insight"}
-    manifest = {"benchmark": benchmark, "status": "candidate_for_internal_validation",
+    manifest = {"benchmark": benchmark, "status": "candidate_for_internal_validation", "version": version,
                 "skill_path": str(target), "skills_dir": str(target.parent.parent),
                 "skill_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
                 "skill_bytes": target.stat().st_size, "skill_token_proxy": token_proxy(markdown),

@@ -150,6 +150,8 @@ class R16Tests(unittest.TestCase):
             insight = {"insight_id": "ins_x", "benchmark": "alfworld", "status": "verified_observation",
                        "evidence_validity": "verified", "utility_status": "unverified", "measurement_specificity": True,
                        "estimated_cost_risk": "low", "trigger_conditions": ["An action returns no state change"],
+                       "cost_bound": {"max_extra_tool_actions": 0, "max_additional_checks": 0,
+                                      "stop_condition": "the next admissible action is submitted."},
                        "avoid_conditions": ["The action changed state"],
                        "expected_behavior_change": "Choose a different admissible action after no-progress feedback",
                        "expected_observation": "The next submitted action differs from the rejected action",

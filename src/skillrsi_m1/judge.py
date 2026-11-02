@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import socket
@@ -15,14 +16,20 @@ from typing import Any
 from .core import TAXONOMY
 
 
-def read_model_config(path: Path) -> tuple[str, str, str]:
+def read_model_config(path: Path | None) -> tuple[str, str, str]:
     """Parse model.txt as data; never execute shell text or print the key."""
-    content = path.read_text(encoding="utf-8")
-    key = re.search(r"^export\s+WQ_API_KEY\s*=\s*['\"]?([^'\"\s]+)", content, re.M)
-    model = re.search(r"^kimi-k2\.6\s+model_id\s*=\s*(\S+)", content, re.M)
-    if not key or not model:
-        raise ValueError(f"{path}: WQ_API_KEY or Kimi K2.6 model ID not found")
-    return key.group(1), model.group(1), "https://wanqing-api.corp.kuaishou.com/api/gateway/v1/endpoints/chat/completions"
+    content = path.read_text(encoding="utf-8") if path else ""
+    key = re.search(r"^(?:export\s+)?(?:WQ_API_KEY|TRACE2SKILL_GENERATION_API_KEY)\s*=\s*['\"]?([^'\"\s]+)", content, re.M)
+    model = re.search(r"^(?:kimi-k2\.6\s+model_id|TRACE2SKILL_MODEL_ID)\s*=\s*(\S+)", content, re.M)
+    key_value = key.group(1) if key else os.environ.get("TRACE2SKILL_GENERATION_API_KEY")
+    model_value = model.group(1) if model else os.environ.get("TRACE2SKILL_MODEL_ID")
+    if not key_value or not model_value:
+        raise ValueError("generation API key or model ID missing")
+    url = re.search(r"^(?:export\s+)?(?:TRACE2SKILL_GENERATION_URL|WQ_BASE_URL)\s*=\s*['\"]?([^'\"\s]+)", content, re.M)
+    endpoint = (url.group(1) if url else os.environ.get("TRACE2SKILL_GENERATION_URL"))
+    if not endpoint:
+        raise ValueError("generation endpoint URL missing; set TRACE2SKILL_GENERATION_URL")
+    return key_value, model_value, endpoint
 
 
 def _json_object(text: str) -> dict[str, Any]:

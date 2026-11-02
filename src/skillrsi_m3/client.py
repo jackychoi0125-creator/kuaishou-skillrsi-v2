@@ -15,7 +15,7 @@ from skillrsi_m1.judge import _json_object, read_model_config
 
 
 class KimiClient:
-    def __init__(self, config_path: Path, cache_dir: Path, *, max_retries: int = 6):
+    def __init__(self, config_path: Path | None, cache_dir: Path, *, max_retries: int = 6):
         self.key, self.model, self.url = read_model_config(config_path)
         self.cache_dir = cache_dir
         self.max_retries = max_retries

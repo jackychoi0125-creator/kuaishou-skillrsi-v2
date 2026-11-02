@@ -43,6 +43,10 @@ M2 的每条 `trace_profile` 使用相同的 `task_signature`、五维 `behavior
 `evidence_audit.json` 将本次入选 L2 的事件逐条与原始 ATIF 比对，统计已确认根因、正反差异和 ALFWorld 成功终态反馈的保留情况。三个 Benchmark 均尽量纳入成功、失败样本；LiveMath 不满足题意相似阈值时保留两类样本但不建立正反配对。长数学推导的视图会标记需要回读全文。
 # R1 M3/M4 contract
 
+## R1.8 可移植入口与交付
+
+`trace2skill evolve` 将外部 Train ATIF JSONL 与逐题 Metrics 输入 M1/M2/M3/M4，使用 `BenchmarkAdapter` 对公开领域做专用解析，并对未知领域退化为通用事件画像。新领域没有可核实的策略效用时输出 `no_candidate`。候选与 Best 始终分开；可选官方 Train A/B/C/D 对照要求固定任务 ID、重复执行和成本门槛，未过门槛不得进入 Val。`submission/` 只包含运行代码、安全汇总与已接纳 Skill；当前三个公开 Benchmark 的 Best 都是无 Skill。`trace2skill.validate_submission` 检查结构、结果 Schema 和敏感信息边界，并标注仍需主办方确认的空 Skill 目录规则。
+
 M3 只读取 M2 的 Train profiles/groups、质量审计和由 `trace_id:event_id` 指向的原始事件。`TraceStore` 在每次读取时重新验证 SHA-256，绝不执行轨迹中的文本。`EvidenceSelector` 优先多轨迹组及可核验对照；`InsightExtractor` 用 Kimi 输出候选，`InsightConsolidator` 记录 ADD/EDIT/AGREE/REMOVE，`EvidenceVerifier` 再核对每个事件和条件。每条 Insight 的 `causal_status` 仍为 `hypothesis_only`，证据支持的是观察事实，不是因果证明。LiveMath 的领域数学结论不进入 R1 Skill；只有轨迹中直接可观察的程序性检查可作为单例假设。
 
 M4 只接收已验证的 Insight，生成一份有触发条件、步骤、禁忌和验证条件的 Harbor `SKILL.md`。静态审计拒绝题目 ID、私有答案路径、具体动作路线和超长规则；候选快照与 Insight ID 保留在 manifest。每个 Benchmark 独立从无 Skill 基线起步。

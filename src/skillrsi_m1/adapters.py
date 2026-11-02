@@ -49,8 +49,11 @@ class BaseAdapter:
     name = "base"
 
     def task_signature(self, record: dict[str, Any], public: dict[str, Any]) -> dict[str, Any]:
-        return {"task_family": "unknown", "task_subtype": "unknown", "task_complexity": "unknown",
-                "required_operations": [], "environment_characteristics": [], "task_constraints": []}
+        metric = record.get("metrics") or {}
+        family = metric.get("task_type") or "unknown"
+        return {"task_family": family, "task_subtype": "unknown", "task_complexity": "unknown",
+                "required_operations": ["tool_interaction"], "environment_characteristics": ["generic_atif"],
+                "task_constraints": []}
 
     def signals(self, record: dict[str, Any], events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         return [], []

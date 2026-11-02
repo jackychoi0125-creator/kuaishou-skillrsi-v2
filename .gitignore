@@ -12,6 +12,8 @@ results/stability/
 results/r2/
 results/r16/
 results/r17/
+results/r18/
+submission.zip
 workspace/
 results/*.log
 results/prepare-summary.json

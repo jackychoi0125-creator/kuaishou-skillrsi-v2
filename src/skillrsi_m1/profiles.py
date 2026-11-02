@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .adapters import ADAPTERS, public_task
+from .adapters import ADAPTERS, BaseAdapter, public_task
 from .core import events_from_trace
 from .m2_diagnostics import candidate_hypotheses
 
@@ -73,7 +73,7 @@ def behavior_signature(events: list[dict[str, Any]], extra: list[dict[str, Any]]
 
 def profile_one(validated: dict[str, Any], legacy: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     benchmark = validated["benchmark"]
-    adapter = ADAPTERS[benchmark]
+    adapter = ADAPTERS.get(benchmark, BaseAdapter())
     public = public_task(validated)
     task = adapter.task_signature(validated, public)
     path = Path(validated["source_trace_path"])
@@ -92,7 +92,7 @@ def profile_one(validated: dict[str, Any], legacy: dict[str, Any] | None = None)
     event_ids = {event["id"] for event in events}
     hypotheses = []
     if eligible and validated["task_outcome"] == "failure":
-        hypotheses = candidate_hypotheses(benchmark, events, validated["metric_trial_path"])
+        hypotheses = candidate_hypotheses(benchmark, events, validated["metric_trial_path"]) if benchmark in ADAPTERS else []
     if legacy and legacy.get("trace_sha256") == validated.get("trace_sha256"):
         for mode in legacy.get("observed_failure_modes", []):
             if mode.get("event_id") in event_ids and not any(item["code"] == mode["code"] for item in symptoms):

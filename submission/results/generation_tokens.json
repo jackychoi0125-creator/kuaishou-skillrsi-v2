@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "service_usage_only": true,
+  "historical_exploration": {
+    "r1": {
+      "api_calls": 22,
+      "prompt_tokens": 255517,
+      "completion_tokens": 27066,
+      "cache_tokens": 0
+    },
+    "r16": {
+      "spreadsheetbench": {
+        "api_calls": 1,
+        "prompt_tokens": 20666,
+        "completion_tokens": 2110,
+        "cache_tokens": 0
+      },
+      "alfworld": {
+        "api_calls": 1,
+        "prompt_tokens": 5459,
+        "completion_tokens": 958,
+        "cache_tokens": 0
+      },
+      "livemath": {
+        "api_calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cache_tokens": 0
+      }
+    }
+  },
+  "r17_incremental": {
+    "spreadsheetbench": {
+      "api_calls": 2,
+      "prompt_tokens": 14803,
+      "completion_tokens": 2823,
+      "cache_tokens": 0
+    },
+    "alfworld": {
+      "api_calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cache_tokens": 0
+    },
+    "livemath": {
+      "api_calls": 2,
+      "prompt_tokens": 13214,
+      "completion_tokens": 1989,
+      "cache_tokens": 0
+    }
+  },
+  "reproducible_submission_run": {
+    "api_calls": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "cache_tokens": 0
+  },
+  "harbor_tokens_separate_from_generation": true,
+  "legacy_m1_judge_reported_not_r18_incremental": {
+    "prompt_tokens": 98827,
+    "completion_tokens": 33874,
+    "reused_cases": 15,
+    "provenance": "historical_M1_recorded_usage_not_current_service_receipts"
+  }
+}

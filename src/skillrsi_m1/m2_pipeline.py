@@ -188,7 +188,7 @@ def select_l2(profiles: list[dict[str, Any]], contrasts: list[dict[str, Any]],
         add(profile["trace_id"])
     ranked_pairs = sorted(contrasts, key=lambda item: (-grade_order[item["matching_grade"]], -item["match_score"]))
     benchmark_first = [next((pair for pair in ranked_pairs if by_id[pair["positive_trace_id"]]["benchmark"] == benchmark), None)
-                       for benchmark in BENCHMARKS]
+                       for benchmark in sorted({profile["benchmark"] for profile in profiles})]
     ordered_pairs = [pair for pair in benchmark_first if pair is not None]
     ordered_pairs.extend(pair for pair in ranked_pairs if pair not in ordered_pairs)
     seeded_benchmarks: set[str] = set()
@@ -207,7 +207,7 @@ def select_l2(profiles: list[dict[str, Any]], contrasts: list[dict[str, Any]],
         if add(p) and add(n):
             pair_ids.append(pair["contrast_id"])
             seeded_benchmarks.add(benchmark)
-    for benchmark in BENCHMARKS:
+    for benchmark in sorted({profile["benchmark"] for profile in profiles}):
         if benchmark in seeded_benchmarks:
             continue
         available_positive = [item for item in profiles if item["benchmark"] == benchmark and
@@ -289,7 +289,8 @@ def deep_view(profile: dict[str, Any], events: list[dict[str, Any]], contrast_ev
 
 def deep_contrast(pair: dict[str, Any], positive: dict[str, Any], negative: dict[str, Any],
                   positive_events: list[dict[str, Any]], negative_events: list[dict[str, Any]]) -> dict[str, Any]:
-    adapter = ADAPTERS[positive["benchmark"]]
+    from .adapters import BaseAdapter
+    adapter = ADAPTERS.get(positive["benchmark"], BaseAdapter())
     p = adapter.contrast_features(positive_events)
     n = adapter.contrast_features(negative_events)
     differences = list(pair["behavior_differences"])

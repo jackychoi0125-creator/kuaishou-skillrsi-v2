@@ -1,0 +1,14 @@
+{
+  "status": "valid_with_unverified_external_requirements",
+  "error": [],
+  "warning": [
+    "no_accepted_skill; runtime may generate one when evidence and validation permit"
+  ],
+  "unverified_external_requirement": [
+    "official_rule_allowing_empty_skills_directory"
+  ],
+  "accepted_skill_count": 0,
+  "file_count": 35,
+  "official_rules_checked_at": "2026-11-02",
+  "official_rules_sha256": "1d42a79001774e45d6e4ebaf61d4b7b3c06eec222caf7d5b05830483024345ed"
+}

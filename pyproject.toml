@@ -18,6 +18,7 @@ skillrsi-ablate-train = "skillrsi_loop.ablation:main"
 skillrsi-stability = "skillrsi_loop.stability:main"
 skillrsi-select-rules = "skillrsi_loop.rule_selection:main"
 skillrsi-interaction = "skillrsi_loop.interaction:main"
+trace2skill = "trace2skill.pipeline:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

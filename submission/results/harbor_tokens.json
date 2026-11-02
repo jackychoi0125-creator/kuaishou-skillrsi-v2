@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "token_source": "official_Harbor_summary",
+  "runs": [
+    {
+      "benchmark": "spreadsheetbench",
+      "round": "r1",
+      "split": "val",
+      "tasks_per_arm": 40,
+      "baseline": {
+        "input_tokens": 1748793.0,
+        "output_tokens": 136977.0,
+        "duration_sec": 3617.0
+      },
+      "candidate": {
+        "input_tokens": 2222969.0,
+        "output_tokens": 153237.0,
+        "duration_sec": 3733.0
+      }
+    },
+    {
+      "benchmark": "alfworld",
+      "round": "r1",
+      "split": "val",
+      "tasks_per_arm": 18,
+      "baseline": {
+        "input_tokens": 2795242.0,
+        "output_tokens": 168795.0,
+        "duration_sec": 3082.0
+      },
+      "candidate": {
+        "input_tokens": 3777194.0,
+        "output_tokens": 246549.0,
+        "duration_sec": 4051.0
+      }
+    },
+    {
+      "benchmark": "livemath",
+      "round": "r1",
+      "split": "val",
+      "tasks_per_arm": 17,
+      "baseline": {
+        "input_tokens": 126188.0,
+        "output_tokens": 88974.0,
+        "duration_sec": 2064.0
+      },
+      "candidate": {
+        "input_tokens": 183284.0,
+        "output_tokens": 66633.0,
+        "duration_sec": 1682.0
+      }
+    },
+    {
+      "benchmark": "spreadsheetbench",
+      "round": "r18",
+      "split": "train_holdout",
+      "status": "incomplete",
+      "actual_task_executions": 24,
+      "input_tokens": 5400163,
+      "output_tokens": 316922
+    }
+  ],
+  "all_known_manifest_jobs": {
+    "jobs": 58,
+    "task_executions": 338,
+    "input_tokens": 34520208,
+    "output_tokens": 2687470,
+    "cache_tokens": 29659648,
+    "scope": "unique_completed_official_jobs_referenced_by_local_manifests"
+  }
+}

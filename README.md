@@ -1,5 +1,10 @@
 # SkillRSI v2 — 统一正反轨迹画像与对照分析
 
+R1.8 提供可移植的 `trace2skill evolve` 入口与 `submission/` 比赛包；安装、Train-only 输入格式、预算、状态和校验命令见 [提交包 README](submission/README.md)。SpreadsheetBench 冻结 Holdout 的官方 A/B/C/D 对照由 `python -m skillrsi_loop.r18_validation` 运行，结果与停止原因写入忽略提交的 `results/r18/`。最新比赛网页列出的目录结构已核对；空的已接纳 Skill 目录是否允许仍待主办方确认。
+R1.8 的调用链、官方 Train 门槛和交付边界见 [R18_VALIDATION_AND_SUBMISSION.md](docs/R18_VALIDATION_AND_SUBMISSION.md)。
+
+复核 R1.8 的步骤：`PYTHONPATH=src .venv/bin/python -m skillrsi_loop.r18_validation --dry-run` 核对冻结计划；去掉 `--dry-run` 后执行官方 Train 对照并可恢复已登记的有效 Run；`PYTHONPATH=src .venv/bin/python -m trace2skill.submission --root . --path submission --zip submission.zip` 重新生成安全提交包；`PYTHONPATH=src .venv/bin/python -m trace2skill.validate_submission --path submission` 校验。官方 Run、原始 Trace 与敏感缓存不进入 Git。
+
 R1.6 的 Skill 暴露审计、Source/Holdout 隔离、单规则编译和官方 Train 内部验证流程见 [R16_EXPOSURE_CROSSFIT.md](docs/R16_EXPOSURE_CROSSFIT.md)。
 
 R1.7 的经验生成漏斗、ALFWorld 命令去重、低成本行为假设与新 Train 隔离计划见 [R17_INSIGHT_BEHAVIOR_OPTIMIZATION.md](docs/R17_INSIGHT_BEHAVIOR_OPTIMIZATION.md)。

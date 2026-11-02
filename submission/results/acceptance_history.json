@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "history": [
+    {
+      "benchmark": "spreadsheetbench",
+      "round": "r1",
+      "decision": "reject",
+      "best_after_round": "no_skill",
+      "score_source": "official_harbor_val"
+    },
+    {
+      "benchmark": "spreadsheetbench",
+      "round": "r17",
+      "decision": "not_evaluated",
+      "best_after_round": "no_skill",
+      "score_source": null
+    },
+    {
+      "benchmark": "alfworld",
+      "round": "r1",
+      "decision": "reject",
+      "best_after_round": "no_skill",
+      "score_source": "official_harbor_val"
+    },
+    {
+      "benchmark": "alfworld",
+      "round": "r17",
+      "decision": "not_evaluated",
+      "best_after_round": "no_skill",
+      "score_source": null
+    },
+    {
+      "benchmark": "livemath",
+      "round": "r1",
+      "decision": "reject",
+      "best_after_round": "no_skill",
+      "score_source": "official_harbor_val"
+    },
+    {
+      "benchmark": "livemath",
+      "round": "r17",
+      "decision": "not_evaluated",
+      "best_after_round": "no_skill",
+      "score_source": null
+    },
+    {
+      "benchmark": "spreadsheetbench",
+      "round": "r18_train_holdout",
+      "decision": "incomplete",
+      "best_after_round": "no_skill",
+      "score_source": "Harbor verifier_result.rewards.reward",
+      "completed_repeats": 1
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "rounds": [
+    {
+      "benchmark": "spreadsheetbench",
+      "round": "r1",
+      "score_source": "official_harbor_val",
+      "baseline_pass": 33,
+      "candidate_pass": 31,
+      "task_count": 40,
+      "fixes": 3,
+      "regressions": 5,
+      "decision": "reject",
+      "candidate_count": 1,
+      "best_version": "no_skill",
+      "stop_reason": "official_val_gate_rejected"
+    },
+    {
+      "benchmark": "alfworld",
+      "round": "r1",
+      "score_source": "official_harbor_val",
+      "baseline_pass": 16,
+      "candidate_pass": 15,
+      "task_count": 18,
+      "fixes": 0,
+      "regressions": 1,
+      "decision": "reject",
+      "candidate_count": 1,
+      "best_version": "no_skill",
+      "stop_reason": "official_val_gate_rejected"
+    },
+    {
+      "benchmark": "livemath",
+      "round": "r1",
+      "score_source": "official_harbor_val",
+      "baseline_pass": 7,
+      "candidate_pass": 4,
+      "task_count": 17,
+      "fixes": 1,
+      "regressions": 4,
+      "decision": "reject",
+      "candidate_count": 1,
+      "best_version": "no_skill",
+      "stop_reason": "official_val_gate_rejected"
+    }
+  ],
+  "current_best": {
+    "spreadsheetbench": {
+      "version": "no_skill",
+      "accepted_skill": null
+    },
+    "alfworld": {
+      "version": "no_skill",
+      "accepted_skill": null
+    },
+    "livemath": {
+      "version": "no_skill",
+      "accepted_skill": null
+    }
+  },
+  "r17_candidate_count": {
+    "spreadsheetbench": 1,
+    "alfworld": 0,
+    "livemath": 0
+  },
+  "r17_candidate_accepted": false,
+  "independence_boundary": "R1.7 Source excludes its frozen Holdout; historical R1 saw all Train",
+  "r18_train_status": "incomplete"
+}
